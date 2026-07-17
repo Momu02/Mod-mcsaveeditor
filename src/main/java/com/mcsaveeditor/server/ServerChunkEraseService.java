@@ -131,13 +131,13 @@ public final class ServerChunkEraseService {
 
         private void eraseIfPresent(ChunkPos pos) throws IOException {
             if (AnvilChunkIo.regionFileExists(chunkRegionPath, pos)) {
-                chunkStorage.write(pos, null);
+                AnvilChunkIo.writeChunk(chunkStorage, pos, null);
             }
             if (AnvilChunkIo.regionFileExists(poiRegionPath, pos)) {
-                poiStorage.write(pos, null);
+                AnvilChunkIo.writeChunk(poiStorage, pos, null);
             }
             if (AnvilChunkIo.regionFileExists(entityRegionPath, pos)) {
-                entityStorage.write(pos, null);
+                AnvilChunkIo.writeChunk(entityStorage, pos, null);
             }
         }
 

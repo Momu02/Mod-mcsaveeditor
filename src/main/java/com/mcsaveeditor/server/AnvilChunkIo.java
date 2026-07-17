@@ -5,10 +5,22 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class AnvilChunkIo {
+    private static final Method WRITE_METHOD;
+
+    static {
+        try {
+            WRITE_METHOD = RegionFileStorage.class.getDeclaredMethod("write", ChunkPos.class, CompoundTag.class);
+            WRITE_METHOD.setAccessible(true);
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException("Failed to find RegionFileStorage.write method", e);
+        }
+    }
+
     private AnvilChunkIo() {
     }
 
@@ -37,9 +49,23 @@ public final class AnvilChunkIo {
     }
 
     public static void eraseChunk(RegionFileStorage chunkStorage, RegionFileStorage poiStorage, RegionFileStorage entityStorage, ChunkPos pos) throws IOException {
-        chunkStorage.write(pos, null);
-        poiStorage.write(pos, null);
-        entityStorage.write(pos, null);
+        writeChunk(chunkStorage, pos, null);
+        writeChunk(poiStorage, pos, null);
+        writeChunk(entityStorage, pos, null);
+    }
+
+    static void writeChunk(RegionFileStorage storage, ChunkPos pos, CompoundTag tag) throws IOException {
+        try {
+            WRITE_METHOD.invoke(storage, pos, tag);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException io) {
+                throw io;
+            }
+            throw new IOException("Failed to write chunk", cause);
+        } catch (IllegalAccessException e) {
+            throw new IOException("Reflection access error", e);
+        }
     }
 
     private static void eraseFromStorage(Path regionPath, ChunkPos pos) throws IOException {
@@ -48,7 +74,7 @@ public final class AnvilChunkIo {
         }
 
         try (RegionFileStorage storage = new RegionFileStorage(regionPath, false)) {
-            storage.write(pos, null);
+            writeChunk(storage, pos, null);
             storage.flush();
         }
     }
