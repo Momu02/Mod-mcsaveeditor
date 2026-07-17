@@ -1,4 +1,4 @@
-name: 编译模组
+name: build-mod
 
 on:
   push:
@@ -16,28 +16,30 @@ jobs:
       image: gradle:8.5-jdk17-jammy
 
     steps:
-      - name: 0. URL 偷天换日（内网强制短接）
+      - name: 0. Rewrite public Gitea URL to internal URL
         run: git config --global url."http://172.18.0.2:3000/".insteadOf "https://git.momu2.com/"
 
-      - name: 1. 检出代码
+      - name: 1. Checkout source
         run: |
-          git clone "http://172.18.0.2:3000/$GITHUB_REPOSITORY.git" .
+          git clone "http://172.18.0.2:3000/$GITHUB_REPOSITORY.git" . || \
+            git -c "http.extraHeader=Authorization: token $ACTIONS_RUNTIME_TOKEN" \
+              clone "http://172.18.0.2:3000/$GITHUB_REPOSITORY.git" .
           git checkout "$GITHUB_REF_NAME"
 
-      - name: 2. 准备 Gradle 缓存目录
+      - name: 2. Prepare Gradle cache
         run: mkdir -p "$HOME/.gradle"
 
-      - name: 3. 编译 Forge 模组
+      - name: 3. Build Forge mod
         run: gradle build --no-daemon --stacktrace
 
-      - name: 4. 收集 JAR
+      - name: 4. Collect jars
         run: |
           mkdir -p ./dist
           find . -path "*/build/libs/*.jar" ! -name "*-sources.jar" ! -name "*-all.jar" -exec cp {} ./dist/ \;
-          echo "=== 编译产物 ==="
+          echo "=== Build artifacts ==="
           ls -lh ./dist/
 
-      - name: 5. 上传到 Release
+      - name: 5. Upload release assets
         run: |
           TAG="build-$(date +%Y%m%d-%H%M%S)"
           echo "Tag: $TAG"
@@ -46,17 +48,17 @@ jobs:
             -H "Authorization: token $ACTIONS_RUNTIME_TOKEN" \
             -H "Content-Type: application/json" \
             "http://172.18.0.2:3000/api/v1/repos/$GITHUB_REPOSITORY/releases" \
-            -d "{\"tag_name\":\"$TAG\",\"name\":\"构建 #$GITHUB_RUN_NUMBER\",\"body\":\"自动编译于 $GITHUB_SHA\"}")
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"Build #$GITHUB_RUN_NUMBER\",\"body\":\"Automated build for $GITHUB_SHA\"}")
           echo "$RESP"
 
           RELEASE_ID=$(echo "$RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
           echo "Release ID: $RELEASE_ID"
 
           for JAR in ./dist/*.jar; do
-            echo "上传: $JAR"
+            echo "Uploading: $JAR"
             curl -sS -X POST \
               -H "Authorization: token $ACTIONS_RUNTIME_TOKEN" \
               -F "attachment=@$JAR" \
               "http://172.18.0.2:3000/api/v1/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets"
           done
-          echo "上传完成！"
+          echo "Upload complete."
