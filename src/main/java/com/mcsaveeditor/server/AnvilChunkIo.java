@@ -5,10 +5,14 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class AnvilChunkIo {
+    private static final Method WRITE_METHOD = findWriteMethod();
+
     private AnvilChunkIo() {
     }
 
@@ -41,13 +45,23 @@ public final class AnvilChunkIo {
     }
 
     public static void eraseChunk(RegionFileStorage chunkStorage, RegionFileStorage poiStorage, RegionFileStorage entityStorage, ChunkPos pos) throws IOException {
-        writable(chunkStorage).writeChunk(pos, null);
-        writable(poiStorage).writeChunk(pos, null);
-        writable(entityStorage).writeChunk(pos, null);
+        writeChunk(chunkStorage, pos, null);
+        writeChunk(poiStorage, pos, null);
+        writeChunk(entityStorage, pos, null);
     }
 
     static void writeChunk(RegionFileStorage storage, ChunkPos pos, CompoundTag tag) throws IOException {
-        writable(storage).writeChunk(pos, tag);
+        try {
+            WRITE_METHOD.invoke(storage, pos, tag);
+        } catch (InvocationTargetException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw new IOException("RegionFileStorage.write failed", cause);
+        } catch (IllegalAccessException | IllegalArgumentException exception) {
+            throw new IOException("Unable to invoke RegionFileStorage.write", exception);
+        }
     }
 
     private static void eraseFromStorage(Path regionPath, ChunkPos pos) throws IOException {
@@ -55,27 +69,23 @@ public final class AnvilChunkIo {
             return;
         }
 
-        try (WritableRegionFileStorage storage = new WritableRegionFileStorage(regionPath, false)) {
-            storage.writeChunk(pos, null);
+        try (RegionFileStorage storage = new RegionFileStorage(regionPath, false)) {
+            writeChunk(storage, pos, null);
             storage.flush();
         }
     }
 
-    private static WritableRegionFileStorage writable(RegionFileStorage storage) throws IOException {
-        if (storage instanceof WritableRegionFileStorage writable) {
-            return writable;
+    private static Method findWriteMethod() {
+        for (Method method : RegionFileStorage.class.getDeclaredMethods()) {
+            Class<?>[] parameters = method.getParameterTypes();
+            if (parameters.length == 2
+                    && parameters[0] == ChunkPos.class
+                    && parameters[1] == CompoundTag.class) {
+                method.setAccessible(true);
+                return method;
+            }
         }
-        throw new IOException("Chunk storage is not writable");
-    }
-
-    public static final class WritableRegionFileStorage extends RegionFileStorage {
-        public WritableRegionFileStorage(Path path, boolean sync) {
-            super(path, sync);
-        }
-
-        public void writeChunk(ChunkPos pos, CompoundTag tag) throws IOException {
-            write(pos, tag);
-        }
+        throw new IllegalStateException("Unable to find RegionFileStorage chunk write method");
     }
 
     private static long readInhabitedTime(CompoundTag tag) {

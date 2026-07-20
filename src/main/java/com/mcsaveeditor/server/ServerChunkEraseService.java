@@ -165,7 +165,7 @@ public final class ServerChunkEraseService {
         }
 
         private static RegionFileStorage openStorage(Path path) {
-            return new AnvilChunkIo.WritableRegionFileStorage(path, false);
+            return new RegionFileStorage(path, false);
         }
 
         private static void flushAndClose(RegionFileStorage storage) {
