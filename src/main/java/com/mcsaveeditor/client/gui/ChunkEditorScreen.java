@@ -25,8 +25,7 @@ public class ChunkEditorScreen extends Screen {
     private static final int MAX_CELL = 48;
     private static final int GRID_LINE_COLOR = 0x55303030;
     private static final int AXIS_COLOR = 0xAAE6E6E6;
-    private static final int SCANNED_COLOR = 0x88FFB000;
-    private static final int SELECTED_COLOR = 0xAAE23535;
+    private static final int SELECTED_COLOR = 0x66E23535;
     private static final int PREVIEW_COLOR = 0x55FF6060;
 
     private final int centerChunkX;
@@ -122,6 +121,8 @@ public class ChunkEditorScreen extends Screen {
         int minChunkZ = screenToChunkZ(top);
         int maxChunkZ = screenToChunkZ(bottom) + 1;
 
+        drawTerrain(graphics, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
+
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             int screenX = chunkToScreenX(chunkX);
             int color = chunkX == centerChunkX ? AXIS_COLOR : GRID_LINE_COLOR;
@@ -134,8 +135,7 @@ public class ChunkEditorScreen extends Screen {
             graphics.hLine(left, right, screenY, color);
         }
 
-        drawChunkOverlays(graphics, scanned.keySet(), SCANNED_COLOR);
-        drawChunkOverlays(graphics, selected, SELECTED_COLOR);
+        drawVisibleOverlays(graphics, selected, SELECTED_COLOR, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
 
         if ((selecting || deselecting) && mouseX >= SIDEBAR_WIDTH) {
             drawPreview(graphics);
@@ -148,19 +148,98 @@ public class ChunkEditorScreen extends Screen {
         }
     }
 
-    private void drawChunkOverlays(GuiGraphics graphics, Iterable<Long> chunks, int color) {
-        for (long key : chunks) {
-            int chunkX = (int) key;
-            int chunkZ = (int) (key >> 32);
-            int x0 = chunkToScreenX(chunkX);
-            int y0 = chunkToScreenY(chunkZ);
-            int x1 = chunkToScreenX(chunkX + 1);
-            int y1 = chunkToScreenY(chunkZ + 1);
-            if (x1 < SIDEBAR_WIDTH || x0 > width || y1 < 0 || y0 > height) {
+    private void drawTerrain(GuiGraphics graphics, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
+        int chunkStep = Math.max(1, (int) Math.ceil(10.0D / cellSize));
+        int sampleStep = chunkStep > 1 ? ChunkTimeEntry.MAP_SIZE
+                : Math.max(1, Math.min(ChunkTimeEntry.MAP_SIZE, (int) Math.ceil(48.0D / cellSize)));
+        minChunkX = Math.floorDiv(minChunkX, chunkStep) * chunkStep;
+        minChunkZ = Math.floorDiv(minChunkZ, chunkStep) * chunkStep;
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            if ((chunkX - minChunkX) % chunkStep != 0) {
                 continue;
             }
-            graphics.fill(Math.max(x0, SIDEBAR_WIDTH), Math.max(y0, 0), Math.min(x1, width), Math.min(y1, height), color);
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if ((chunkZ - minChunkZ) % chunkStep != 0) {
+                    continue;
+                }
+                ChunkTimeEntry entry = findTerrainEntry(chunkX, chunkZ, chunkStep);
+                if (entry == null || entry.terrainColors().length != ChunkTimeEntry.MAP_PIXELS) {
+                    continue;
+                }
+                if (chunkStep > 1) {
+                    graphics.fill(Math.max(chunkToScreenX(chunkX), SIDEBAR_WIDTH), Math.max(chunkToScreenY(chunkZ), 0),
+                            Math.min(chunkToScreenX(chunkX + chunkStep), width), Math.min(chunkToScreenY(chunkZ + chunkStep), height),
+                            entry.terrainColors()[ChunkTimeEntry.MAP_PIXELS / 2]);
+                    continue;
+                }
+                for (int sampleZ = 0; sampleZ < ChunkTimeEntry.MAP_SIZE; sampleZ += sampleStep) {
+                    for (int sampleX = 0; sampleX < ChunkTimeEntry.MAP_SIZE; sampleX += sampleStep) {
+                        int x0 = sampleToScreenX(chunkX, sampleX);
+                        int y0 = sampleToScreenY(chunkZ, sampleZ);
+                        int x1 = sampleToScreenX(chunkX, Math.min(sampleX + sampleStep, ChunkTimeEntry.MAP_SIZE));
+                        int y1 = sampleToScreenY(chunkZ, Math.min(sampleZ + sampleStep, ChunkTimeEntry.MAP_SIZE));
+                        graphics.fill(Math.max(x0, SIDEBAR_WIDTH), Math.max(y0, 0), Math.min(x1, width),
+                                Math.min(y1, height), entry.terrainColors()[sampleZ * ChunkTimeEntry.MAP_SIZE + sampleX]);
+                    }
+                }
+            }
         }
+    }
+
+    private ChunkTimeEntry findTerrainEntry(int chunkX, int chunkZ, int chunkStep) {
+        for (int offsetX = 0; offsetX < chunkStep; offsetX++) {
+            for (int offsetZ = 0; offsetZ < chunkStep; offsetZ++) {
+                ChunkTimeEntry entry = scanned.get(ChunkPos.asLong(chunkX + offsetX, chunkZ + offsetZ));
+                if (entry != null) {
+                    return entry;
+                }
+            }
+        }
+        return null;
+    }
+
+    private void drawVisibleOverlays(GuiGraphics graphics, Set<Long> chunks, int color,
+                                     int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
+        int chunkStep = Math.max(1, (int) Math.ceil(6.0D / cellSize));
+        minChunkX = Math.floorDiv(minChunkX, chunkStep) * chunkStep;
+        minChunkZ = Math.floorDiv(minChunkZ, chunkStep) * chunkStep;
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            if ((chunkX - minChunkX) % chunkStep != 0) {
+                continue;
+            }
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if ((chunkZ - minChunkZ) % chunkStep != 0
+                        || !containsChunk(chunks, chunkX, chunkZ, chunkStep)) {
+                    continue;
+                }
+                int x0 = chunkToScreenX(chunkX);
+                int y0 = chunkToScreenY(chunkZ);
+                int x1 = chunkToScreenX(chunkX + chunkStep);
+                int y1 = chunkToScreenY(chunkZ + chunkStep);
+                graphics.fill(Math.max(x0, SIDEBAR_WIDTH), Math.max(y0, 0), Math.min(x1, width), Math.min(y1, height), color);
+            }
+        }
+    }
+
+    private boolean containsChunk(Set<Long> chunks, int chunkX, int chunkZ, int chunkStep) {
+        for (int offsetX = 0; offsetX < chunkStep; offsetX++) {
+            for (int offsetZ = 0; offsetZ < chunkStep; offsetZ++) {
+                if (chunks.contains(ChunkPos.asLong(chunkX + offsetX, chunkZ + offsetZ))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private int sampleToScreenX(int chunkX, int sampleX) {
+        return (int) Math.floor(gridCenterX()
+                + (chunkX + sampleX / (double) ChunkTimeEntry.MAP_SIZE - centerChunkX - panChunkX) * cellSize);
+    }
+
+    private int sampleToScreenY(int chunkZ, int sampleZ) {
+        return (int) Math.floor(gridCenterY()
+                + (chunkZ + sampleZ / (double) ChunkTimeEntry.MAP_SIZE - centerChunkZ - panChunkZ) * cellSize);
     }
 
     private void drawPreview(GuiGraphics graphics) {

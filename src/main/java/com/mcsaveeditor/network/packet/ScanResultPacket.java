@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public record ScanResultPacket(List<ChunkTimeEntry> chunks) {
-    public static final int MAX_RESULTS = 8192;
+    public static final int MAX_RESULTS = 256;
 
     public static void encode(ScanResultPacket packet, FriendlyByteBuf buf) {
         int size = Math.min(packet.chunks.size(), MAX_RESULTS);
@@ -21,6 +21,10 @@ public record ScanResultPacket(List<ChunkTimeEntry> chunks) {
             buf.writeVarInt(entry.chunkX());
             buf.writeVarInt(entry.chunkZ());
             buf.writeVarLong(entry.inhabitedTicks());
+            for (int pixel = 0; pixel < ChunkTimeEntry.MAP_PIXELS; pixel++) {
+                int color = pixel < entry.terrainColors().length ? entry.terrainColors()[pixel] : 0xFF17202A;
+                buf.writeInt(color);
+            }
         }
     }
 
@@ -28,7 +32,14 @@ public record ScanResultPacket(List<ChunkTimeEntry> chunks) {
         int size = Math.min(buf.readVarInt(), MAX_RESULTS);
         List<ChunkTimeEntry> chunks = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
-            chunks.add(new ChunkTimeEntry(buf.readVarInt(), buf.readVarInt(), buf.readVarLong()));
+            int chunkX = buf.readVarInt();
+            int chunkZ = buf.readVarInt();
+            long inhabitedTicks = buf.readVarLong();
+            int[] terrainColors = new int[ChunkTimeEntry.MAP_PIXELS];
+            for (int pixel = 0; pixel < terrainColors.length; pixel++) {
+                terrainColors[pixel] = buf.readInt();
+            }
+            chunks.add(new ChunkTimeEntry(chunkX, chunkZ, inhabitedTicks, terrainColors));
         }
         return new ScanResultPacket(chunks);
     }

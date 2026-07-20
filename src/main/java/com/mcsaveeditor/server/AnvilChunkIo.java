@@ -39,6 +39,10 @@ public final class AnvilChunkIo {
         if (tag == null || tag.isEmpty()) {
             return -1L;
         }
+        return readInhabitedTicks(tag);
+    }
+
+    public static long readInhabitedTicks(CompoundTag tag) {
         return readInhabitedTime(tag);
     }
 
