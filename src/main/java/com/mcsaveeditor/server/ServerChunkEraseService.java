@@ -164,7 +164,7 @@ public final class ServerChunkEraseService {
         }
 
         private void forgetClientChunk(ChunkPos pos) {
-            ClientboundForgetLevelChunkPacket packet = new ClientboundForgetLevelChunkPacket(pos);
+            ClientboundForgetLevelChunkPacket packet = new ClientboundForgetLevelChunkPacket(pos.x, pos.z);
             for (ServerPlayer player : level.players()) {
                 player.connection.send(packet);
             }
