@@ -3,6 +3,7 @@ package com.mcsaveeditor.server;
 import com.mcsaveeditor.network.packet.DeleteChunksPacket;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -122,22 +123,50 @@ public final class ServerChunkEraseService {
             }
 
             try {
-                eraseIfPresent(pos);
-                deleted++;
+                if (eraseIfPresent(pos)) {
+                    forgetClientChunk(pos);
+                    deleted++;
+                } else {
+                    skipped++;
+                }
             } catch (IOException exception) {
                 skipped++;
             }
         }
 
-        private void eraseIfPresent(ChunkPos pos) throws IOException {
+        private boolean eraseIfPresent(ChunkPos pos) throws IOException {
+            boolean present = false;
             if (AnvilChunkIo.regionFileExists(chunkRegionPath, pos)) {
+                present = AnvilChunkIo.hasChunk(chunkStorage, pos);
                 AnvilChunkIo.writeChunk(chunkStorage, pos, null);
             }
             if (AnvilChunkIo.regionFileExists(poiRegionPath, pos)) {
+                present |= AnvilChunkIo.hasChunk(poiStorage, pos);
                 AnvilChunkIo.writeChunk(poiStorage, pos, null);
             }
             if (AnvilChunkIo.regionFileExists(entityRegionPath, pos)) {
+                present |= AnvilChunkIo.hasChunk(entityStorage, pos);
                 AnvilChunkIo.writeChunk(entityStorage, pos, null);
+            }
+            chunkStorage.flush();
+            poiStorage.flush();
+            entityStorage.flush();
+            verifyErased(chunkStorage, pos, chunkRegionPath);
+            verifyErased(poiStorage, pos, poiRegionPath);
+            verifyErased(entityStorage, pos, entityRegionPath);
+            return present;
+        }
+
+        private void verifyErased(RegionFileStorage storage, ChunkPos pos, Path regionPath) throws IOException {
+            if (AnvilChunkIo.regionFileExists(regionPath, pos) && storage.read(pos) != null) {
+                throw new IOException("Region file still contains chunk " + pos);
+            }
+        }
+
+        private void forgetClientChunk(ChunkPos pos) {
+            ClientboundForgetLevelChunkPacket packet = new ClientboundForgetLevelChunkPacket(pos);
+            for (ServerPlayer player : level.players()) {
+                player.connection.send(packet);
             }
         }
 
@@ -161,7 +190,7 @@ public final class ServerChunkEraseService {
                 flushAndClose(entityStorage);
                 return true;
             }
-            return queue.isEmpty();
+            return false;
         }
 
         private static RegionFileStorage openStorage(Path path) {

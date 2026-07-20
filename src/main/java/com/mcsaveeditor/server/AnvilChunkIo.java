@@ -38,6 +38,11 @@ public final class AnvilChunkIo {
         return readInhabitedTime(tag);
     }
 
+    public static boolean hasChunk(RegionFileStorage storage, ChunkPos pos) throws IOException {
+        CompoundTag tag = storage.read(pos);
+        return tag != null && !tag.isEmpty();
+    }
+
     public static void eraseChunk(Path chunkRegionPath, Path poiRegionPath, Path entityRegionPath, ChunkPos pos) throws IOException {
         eraseFromStorage(chunkRegionPath, pos);
         eraseFromStorage(poiRegionPath, pos);
