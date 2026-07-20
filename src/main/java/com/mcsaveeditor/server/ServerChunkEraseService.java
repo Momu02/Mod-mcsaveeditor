@@ -1,6 +1,8 @@
 package com.mcsaveeditor.server;
 
+import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.network.packet.DeleteChunksPacket;
+import com.mcsaveeditor.network.packet.DeletedChunksPacket;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
@@ -10,10 +12,12 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.network.PacketDistributor;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Queue;
@@ -38,6 +42,7 @@ public final class ServerChunkEraseService {
 
         ServerLevel level = player.serverLevel();
         List<ChunkPos> distinct = packet.chunks().stream().distinct().limit(DeleteChunksPacket.MAX_DELETE_COUNT).toList();
+        ServerChunkScanService.cancelScan(player, false);
         JOBS.add(new EraseJob(level, distinct));
         player.sendSystemMessage(Component.literal("MC Save Editor: queued " + distinct.size() + " chunks for safe erase."));
     }
@@ -92,17 +97,24 @@ public final class ServerChunkEraseService {
         }
 
         private void tick() {
+            List<ChunkPos> erased = new ArrayList<>(CHUNKS_PER_TICK);
             int processed = 0;
             while (processed++ < CHUNKS_PER_TICK && !queue.isEmpty()) {
                 PendingChunk pending = queue.poll();
                 if (pending == null) {
                     continue;
                 }
-                process(pending);
+                if (process(pending)) {
+                    erased.add(pending.pos);
+                }
+            }
+            if (!erased.isEmpty()) {
+                ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
+                        new DeletedChunksPacket(List.copyOf(erased)));
             }
         }
 
-        private void process(PendingChunk pending) {
+        private boolean process(PendingChunk pending) {
             ChunkPos pos = pending.pos;
             ServerChunkCache chunkSource = level.getChunkSource();
 
@@ -110,7 +122,7 @@ public final class ServerChunkEraseService {
 
             if (isNearAnyPlayer(pos)) {
                 skipped++;
-                return;
+                return false;
             }
 
             if (chunkSource.hasChunk(pos.x, pos.z)) {
@@ -119,19 +131,22 @@ public final class ServerChunkEraseService {
                 } else {
                     skipped++;
                 }
-                return;
+                return false;
             }
 
             try {
                 if (eraseIfPresent(pos)) {
                     forgetClientChunk(pos);
                     deleted++;
+                    return true;
                 } else {
                     skipped++;
+                    return true;
                 }
             } catch (IOException exception) {
                 skipped++;
             }
+            return false;
         }
 
         private boolean eraseIfPresent(ChunkPos pos) throws IOException {

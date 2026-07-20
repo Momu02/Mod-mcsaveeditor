@@ -1,6 +1,7 @@
 package com.mcsaveeditor.client.gui;
 
 import com.mcsaveeditor.network.ModNetworking;
+import com.mcsaveeditor.network.packet.CancelScanPacket;
 import com.mcsaveeditor.network.packet.ChunkTimeEntry;
 import com.mcsaveeditor.network.packet.DeleteChunksPacket;
 import com.mcsaveeditor.network.packet.ScanRequestPacket;
@@ -61,6 +62,10 @@ public class ChunkEditorScreen extends Screen {
         radiusBox.setValue("128");
         addRenderableWidget(radiusBox);
 
+        addRenderableWidget(Button.builder(Component.literal("Cancel Scan"), button -> sendCancelScan())
+                .bounds(x + 84, y, 72, 20)
+                .build());
+
         addRenderableWidget(Button.builder(Component.literal("Scan"), button -> sendScan())
                 .bounds(x, y + 28, 72, 20)
                 .build());
@@ -82,6 +87,14 @@ public class ChunkEditorScreen extends Screen {
         }
     }
 
+    public void acceptDeletedChunks(List<ChunkPos> chunks) {
+        for (ChunkPos pos : chunks) {
+            long key = pos.toLong();
+            scanned.remove(key);
+            selected.remove(key);
+        }
+    }
+
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics);
@@ -94,7 +107,7 @@ public class ChunkEditorScreen extends Screen {
         graphics.fill(0, 0, SIDEBAR_WIDTH, height, 0xE81B1D22);
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
         graphics.drawString(font, "MC Save Editor", 12, 14, 0xFFFFFFFF);
-        graphics.drawString(font, "Scan radius (loaded chunks)", 12, 32, 0xFFBFC5D2);
+        graphics.drawString(font, "Scan radius (saved chunks)", 12, 32, 0xFFBFC5D2);
         graphics.drawString(font, "Selected: " + selected.size(), 12, 168, 0xFFFFFFFF);
         graphics.drawString(font, "Scanned: " + scanned.size(), 12, 182, 0xFFBFC5D2);
         graphics.drawString(font, "Yellow: protected", 12, 196, 0xFFF2C230);
@@ -364,6 +377,16 @@ public class ChunkEditorScreen extends Screen {
         scanned.clear();
         selected.clear();
         ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ, radius));
+    }
+
+    private void sendCancelScan() {
+        ModNetworking.CHANNEL.sendToServer(new CancelScanPacket());
+    }
+
+    @Override
+    public void onClose() {
+        sendCancelScan();
+        super.onClose();
     }
 
     private void sendDelete() {

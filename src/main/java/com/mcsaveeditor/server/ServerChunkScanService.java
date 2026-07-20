@@ -54,6 +54,19 @@ public final class ServerChunkScanService {
         player.sendSystemMessage(Component.literal("MC Save Editor: scanning saved chunks in the requested area..."));
     }
 
+    public static void cancelScan(ServerPlayer player, boolean notify) {
+        boolean cancelled = JOBS.removeIf(job -> {
+            if (job.player == player) {
+                job.close();
+                return true;
+            }
+            return false;
+        });
+        if (cancelled && notify) {
+            player.sendSystemMessage(Component.literal("MC Save Editor: scan cancelled."));
+        }
+    }
+
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || JOBS.isEmpty()) {
             return;
