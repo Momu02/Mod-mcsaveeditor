@@ -6,6 +6,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.Locale;
 
@@ -40,7 +41,7 @@ final class ChunkTerrainSampler {
                 if (topY < chunk.getMinBuildHeight()) {
                     colors[mapZ * ChunkTimeEntry.MAP_SIZE + mapX] = AIR_COLOR;
                 } else {
-                    String block = chunk.getBlockState(pos.set(x, topY, z)).getBlock().toString();
+                    String block = BuiltInRegistries.BLOCK.getKey(chunk.getBlockState(pos.set(x, topY, z)).getBlock()).getPath();
                     colors[mapZ * ChunkTimeEntry.MAP_SIZE + mapX] = shade(baseColor(block), topY);
                 }
             }
@@ -105,7 +106,7 @@ final class ChunkTerrainSampler {
         String name = blockName.toLowerCase(Locale.ROOT);
         if (name.contains("water")) return 0xFF356CB5;
         if (name.contains("lava")) return 0xFFE66A20;
-        if (name.contains("grass") || name.contains("moss")) return 0xFF5D9348;
+        if (name.equals("grass_block") || name.contains("grass") || name.contains("moss")) return 0xFF5D9348;
         if (name.contains("leaves") || name.contains("vine")) return 0xFF39763D;
         if (name.contains("sand") || name.contains("end_stone")) return 0xFFD8CA82;
         if (name.contains("snow") || name.contains("ice")) return 0xFFDDEAF0;

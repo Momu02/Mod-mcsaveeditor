@@ -26,6 +26,7 @@ public class ChunkEditorScreen extends Screen {
     private static final int GRID_LINE_COLOR = 0x55303030;
     private static final int AXIS_COLOR = 0xAAE6E6E6;
     private static final int SELECTED_COLOR = 0x66E23535;
+    private static final int PROTECTED_COLOR = 0x88F2C230;
     private static final int PREVIEW_COLOR = 0x55FF6060;
 
     private final int centerChunkX;
@@ -96,8 +97,9 @@ public class ChunkEditorScreen extends Screen {
         graphics.drawString(font, "Scan radius (loaded chunks)", 12, 32, 0xFFBFC5D2);
         graphics.drawString(font, "Selected: " + selected.size(), 12, 168, 0xFFFFFFFF);
         graphics.drawString(font, "Scanned: " + scanned.size(), 12, 182, 0xFFBFC5D2);
-        graphics.drawString(font, "Center: " + centerChunkX + ", " + centerChunkZ, 12, 204, 0xFFBFC5D2);
-        graphics.drawString(font, "Zoom: " + Math.round(cellSize) + " px", 12, 218, 0xFFBFC5D2);
+        graphics.drawString(font, "Yellow: protected", 12, 196, 0xFFF2C230);
+        graphics.drawString(font, "Center: " + centerChunkX + ", " + centerChunkZ, 12, 218, 0xFFBFC5D2);
+        graphics.drawString(font, "Zoom: " + Math.round(cellSize) + " px", 12, 232, 0xFFBFC5D2);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -127,6 +129,7 @@ public class ChunkEditorScreen extends Screen {
         }
 
         drawVisibleOverlays(graphics, selected, SELECTED_COLOR, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
+        drawProtectedOverlays(graphics, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
 
         if ((selecting || deselecting) && mouseX >= SIDEBAR_WIDTH) {
             drawPreview(graphics);
@@ -208,6 +211,21 @@ public class ChunkEditorScreen extends Screen {
                 int x1 = chunkToScreenX(chunkX + chunkStep);
                 int y1 = chunkToScreenY(chunkZ + chunkStep);
                 graphics.fill(Math.max(x0, SIDEBAR_WIDTH), Math.max(y0, 0), Math.min(x1, width), Math.min(y1, height), color);
+            }
+        }
+    }
+
+    private void drawProtectedOverlays(GuiGraphics graphics, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
+        for (ChunkTimeEntry entry : scanned.values()) {
+            if (!entry.protectedChunk()) {
+                continue;
+            }
+            int x0 = chunkToScreenX(entry.chunkX());
+            int y0 = chunkToScreenY(entry.chunkZ());
+            int x1 = chunkToScreenX(entry.chunkX() + 1);
+            int y1 = chunkToScreenY(entry.chunkZ() + 1);
+            if (x1 >= SIDEBAR_WIDTH && x0 <= width && y1 >= 0 && y0 <= height) {
+                graphics.fill(Math.max(x0, SIDEBAR_WIDTH), Math.max(y0, 0), Math.min(x1, width), Math.min(y1, height), PROTECTED_COLOR);
             }
         }
     }
@@ -328,6 +346,10 @@ public class ChunkEditorScreen extends Screen {
         for (int x = minX; x <= maxX; x++) {
             for (int z = minZ; z <= maxZ; z++) {
                 long key = ChunkPos.asLong(x, z);
+                ChunkTimeEntry entry = scanned.get(key);
+                if (entry != null && entry.protectedChunk()) {
+                    continue;
+                }
                 if (add) {
                     selected.add(key);
                 } else {

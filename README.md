@@ -17,7 +17,7 @@ Forge 1.20.1 dual-side mod prototype for in-game loaded-chunk visualization, sel
 
 - No external database is used. The server reads currently loaded vanilla chunks directly and never generates chunks for a scan.
 - Scan jobs run on the server tick in small batches, so they do not block the game with a large synchronous scan.
-- Terrain previews sample the top block every two blocks and are streamed in batches. Rendering only visits visible chunks and reduces detail while zoomed out.
+- Terrain previews sample the top block every two blocks and are streamed in batches. Rendering only visits visible chunks and reduces detail while zoomed out. Yellow chunks are protected around players and cannot be selected for deletion.
 - Delete jobs run on the server tick thread in small batches. A target chunk is erased only after:
   - forced chunk state is disabled,
   - no player is within the guarded view-distance range,

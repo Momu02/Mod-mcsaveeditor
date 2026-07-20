@@ -21,6 +21,7 @@ public record ScanResultPacket(List<ChunkTimeEntry> chunks) {
             buf.writeVarInt(entry.chunkX());
             buf.writeVarInt(entry.chunkZ());
             buf.writeVarLong(entry.inhabitedTicks());
+            buf.writeBoolean(entry.protectedChunk());
             for (int pixel = 0; pixel < ChunkTimeEntry.MAP_PIXELS; pixel++) {
                 int color = pixel < entry.terrainColors().length ? entry.terrainColors()[pixel] : 0xFF17202A;
                 buf.writeInt(color);
@@ -35,11 +36,12 @@ public record ScanResultPacket(List<ChunkTimeEntry> chunks) {
             int chunkX = buf.readVarInt();
             int chunkZ = buf.readVarInt();
             long inhabitedTicks = buf.readVarLong();
+            boolean protectedChunk = buf.readBoolean();
             int[] terrainColors = new int[ChunkTimeEntry.MAP_PIXELS];
             for (int pixel = 0; pixel < terrainColors.length; pixel++) {
                 terrainColors[pixel] = buf.readInt();
             }
-            chunks.add(new ChunkTimeEntry(chunkX, chunkZ, inhabitedTicks, terrainColors));
+            chunks.add(new ChunkTimeEntry(chunkX, chunkZ, inhabitedTicks, terrainColors, protectedChunk));
         }
         return new ScanResultPacket(chunks);
     }
