@@ -9,7 +9,7 @@ Forge 1.20.1 dual-side mod prototype for in-game chunk visualization, filtering,
 3. Run `/mcsaveeditor open` as an operator with permission level 3 or higher.
 4. In the GUI:
    - Set scan radius and maximum `InhabitedTime` minutes.
-   - Click `Scan` to asynchronously scan Anvil NBT on the server.
+   - Click `Scan` to asynchronously scan Anvil NBT on the server. Generated chunks are shown in amber; chunks below the maximum `InhabitedTime` are selected in red.
    - Left drag selects chunks, right drag removes chunks, middle drag pans, wheel zooms.
    - Click `Confirm Delete` to request server-side erase.
 

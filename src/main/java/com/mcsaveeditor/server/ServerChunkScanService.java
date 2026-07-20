@@ -34,15 +34,13 @@ public final class ServerChunkScanService {
 
         ServerLevel level = player.serverLevel();
         int radius = Math.min(Math.max(request.radiusChunks(), 1), ScanRequestPacket.MAX_RADIUS);
-        int maxMinutes = Math.max(request.maxMinutes(), 0);
         Path chunkRegionPath = WorldStoragePaths.chunkRegion(level);
 
         player.sendSystemMessage(Component.literal("MC Save Editor: scanning chunk NBT asynchronously..."));
-        SCAN_EXECUTOR.execute(() -> scan(player, chunkRegionPath, request.centerChunkX(), request.centerChunkZ(), radius, maxMinutes));
+        SCAN_EXECUTOR.execute(() -> scan(player, chunkRegionPath, request.centerChunkX(), request.centerChunkZ(), radius));
     }
 
-    private static void scan(ServerPlayer player, Path chunkRegionPath, int centerX, int centerZ, int radius, int maxMinutes) {
-        long thresholdTicks = maxMinutes * 1200L;
+    private static void scan(ServerPlayer player, Path chunkRegionPath, int centerX, int centerZ, int radius) {
         List<ChunkTimeEntry> batch = new ArrayList<>(ScanResultPacket.MAX_RESULTS);
 
         try (RegionFileStorage storage = new RegionFileStorage(chunkRegionPath, true)) {
@@ -54,7 +52,7 @@ public final class ServerChunkScanService {
                     }
                     try {
                         long ticks = AnvilChunkIo.readInhabitedTicks(storage, pos);
-                        if (ticks >= 0L && ticks < thresholdTicks) {
+                        if (ticks >= 0L) {
                             batch.add(new ChunkTimeEntry(x, z, ticks));
                             if (batch.size() >= ScanResultPacket.MAX_RESULTS) {
                                 sendBatch(player, batch);

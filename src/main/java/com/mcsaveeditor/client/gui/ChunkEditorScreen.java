@@ -39,6 +39,7 @@ public class ChunkEditorScreen extends Screen {
     private double panChunkX;
     private double panChunkZ;
     private double cellSize = 14.0D;
+    private long scanThresholdTicks = 5L * 1200L;
     private boolean panning;
     private boolean selecting;
     private boolean deselecting;
@@ -84,7 +85,9 @@ public class ChunkEditorScreen extends Screen {
         for (ChunkTimeEntry entry : entries) {
             long key = ChunkPos.asLong(entry.chunkX(), entry.chunkZ());
             scanned.put(key, entry);
-            selected.add(key);
+            if (entry.inhabitedTicks() < scanThresholdTicks) {
+                selected.add(key);
+            }
         }
     }
 
@@ -267,6 +270,7 @@ public class ChunkEditorScreen extends Screen {
     private void sendScan() {
         int radius = parsePositive(radiusBox.getValue(), 128);
         int minutes = parsePositive(minutesBox.getValue(), 5);
+        scanThresholdTicks = minutes * 1200L;
         scanned.clear();
         selected.clear();
         ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ, radius, minutes));
