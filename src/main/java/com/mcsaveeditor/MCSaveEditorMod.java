@@ -4,6 +4,7 @@ import com.mcsaveeditor.client.ClientBootstrap;
 import com.mcsaveeditor.command.ModCommands;
 import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.server.ServerChunkEraseService;
+import com.mcsaveeditor.server.ServerChunkScanService;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -22,6 +23,7 @@ public class MCSaveEditorMod {
 
         MinecraftForge.EVENT_BUS.addListener(ModCommands::register);
         MinecraftForge.EVENT_BUS.addListener(ServerChunkEraseService::onServerTick);
+        MinecraftForge.EVENT_BUS.addListener(ServerChunkScanService::onServerTick);
 
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ClientBootstrap::init);
     }

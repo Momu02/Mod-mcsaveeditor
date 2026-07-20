@@ -7,18 +7,17 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
-public record ScanRequestPacket(int centerChunkX, int centerChunkZ, int radiusChunks, int maxMinutes) {
+public record ScanRequestPacket(int centerChunkX, int centerChunkZ, int radiusChunks) {
     public static final int MAX_RADIUS = 512;
 
     public static void encode(ScanRequestPacket packet, FriendlyByteBuf buf) {
         buf.writeVarInt(packet.centerChunkX);
         buf.writeVarInt(packet.centerChunkZ);
         buf.writeVarInt(packet.radiusChunks);
-        buf.writeVarInt(packet.maxMinutes);
     }
 
     public static ScanRequestPacket decode(FriendlyByteBuf buf) {
-        return new ScanRequestPacket(buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
+        return new ScanRequestPacket(buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
     }
 
     public static void handle(ScanRequestPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {

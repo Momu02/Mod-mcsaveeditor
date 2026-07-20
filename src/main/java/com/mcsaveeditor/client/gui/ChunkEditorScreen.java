@@ -34,11 +34,9 @@ public class ChunkEditorScreen extends Screen {
     private final Set<Long> selected = new HashSet<>();
 
     private EditBox radiusBox;
-    private EditBox minutesBox;
     private double panChunkX;
     private double panChunkZ;
     private double cellSize = 14.0D;
-    private long scanThresholdTicks = 5L * 1200L;
     private boolean panning;
     private boolean selecting;
     private boolean deselecting;
@@ -62,10 +60,6 @@ public class ChunkEditorScreen extends Screen {
         radiusBox.setValue("128");
         addRenderableWidget(radiusBox);
 
-        minutesBox = new EditBox(font, x + 84, y, 72, 20, Component.literal("Minutes"));
-        minutesBox.setValue("5");
-        addRenderableWidget(minutesBox);
-
         addRenderableWidget(Button.builder(Component.literal("Scan"), button -> sendScan())
                 .bounds(x, y + 28, 72, 20)
                 .build());
@@ -84,9 +78,6 @@ public class ChunkEditorScreen extends Screen {
         for (ChunkTimeEntry entry : entries) {
             long key = ChunkPos.asLong(entry.chunkX(), entry.chunkZ());
             scanned.put(key, entry);
-            if (entry.inhabitedTicks() < scanThresholdTicks) {
-                selected.add(key);
-            }
         }
     }
 
@@ -102,7 +93,7 @@ public class ChunkEditorScreen extends Screen {
         graphics.fill(0, 0, SIDEBAR_WIDTH, height, 0xE81B1D22);
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
         graphics.drawString(font, "MC Save Editor", 12, 14, 0xFFFFFFFF);
-        graphics.drawString(font, "Radius / Minutes", 12, 32, 0xFFBFC5D2);
+        graphics.drawString(font, "Scan radius (loaded chunks)", 12, 32, 0xFFBFC5D2);
         graphics.drawString(font, "Selected: " + selected.size(), 12, 168, 0xFFFFFFFF);
         graphics.drawString(font, "Scanned: " + scanned.size(), 12, 182, 0xFFBFC5D2);
         graphics.drawString(font, "Center: " + centerChunkX + ", " + centerChunkZ, 12, 204, 0xFFBFC5D2);
@@ -348,11 +339,9 @@ public class ChunkEditorScreen extends Screen {
 
     private void sendScan() {
         int radius = parsePositive(radiusBox.getValue(), 128);
-        int minutes = parsePositive(minutesBox.getValue(), 5);
-        scanThresholdTicks = minutes * 1200L;
         scanned.clear();
         selected.clear();
-        ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ, radius, minutes));
+        ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ, radius));
     }
 
     private void sendDelete() {

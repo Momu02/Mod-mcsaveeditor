@@ -8,25 +8,18 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.storage.RegionFileStorage;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
 
-import java.io.IOException;
-import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.LockSupport;
+import java.util.Queue;
 
 public final class ServerChunkScanService {
-    private static final ExecutorService SCAN_EXECUTOR = Executors.newSingleThreadExecutor(new ScanThreadFactory());
-    private static final ConcurrentHashMap<UUID, AtomicLong> SCAN_GENERATIONS = new ConcurrentHashMap<>();
+    private static final Queue<ScanJob> JOBS = new ArrayDeque<>();
+    private static final int CHUNKS_PER_TICK = 8;
 
     private ServerChunkScanService() {
     }
@@ -39,62 +32,35 @@ public final class ServerChunkScanService {
 
         ServerLevel level = player.serverLevel();
         int radius = Math.min(Math.max(request.radiusChunks(), 1), ScanRequestPacket.MAX_RADIUS);
-        Path chunkRegionPath = WorldStoragePaths.chunkRegion(level);
-        AtomicLong playerGeneration = SCAN_GENERATIONS.computeIfAbsent(player.getUUID(), ignored -> new AtomicLong());
-        long generation = playerGeneration.incrementAndGet();
-
-        player.sendSystemMessage(Component.literal("MC Save Editor: scanning chunk NBT asynchronously..."));
-        SCAN_EXECUTOR.execute(() -> scan(player, chunkRegionPath, request.centerChunkX(), request.centerChunkZ(), radius,
-                playerGeneration, generation));
-    }
-
-    private static void scan(ServerPlayer player, Path chunkRegionPath, int centerX, int centerZ, int radius,
-                             AtomicLong playerGeneration, long generation) {
-        List<ChunkTimeEntry> batch = new ArrayList<>(ScanResultPacket.MAX_RESULTS);
-        int sampledChunks = 0;
-
-        try (RegionFileStorage storage = new RegionFileStorage(chunkRegionPath, true)) {
-            for (int distance = 0; distance <= radius; distance++) {
-                for (int x = centerX - distance; x <= centerX + distance; x++) {
-                    for (int z = centerZ - distance; z <= centerZ + distance; z++) {
-                        if (Math.max(Math.abs(x - centerX), Math.abs(z - centerZ)) != distance) {
-                            continue;
-                        }
-                        if (generation != playerGeneration.get()) {
-                            return;
-                        }
-                        ChunkPos pos = new ChunkPos(x, z);
-                        if (!AnvilChunkIo.regionFileExists(chunkRegionPath, pos)) {
-                            continue;
-                        }
-                        try {
-                            net.minecraft.nbt.CompoundTag tag = storage.read(pos);
-                            if (tag != null && !tag.isEmpty()) {
-                                long ticks = AnvilChunkIo.readInhabitedTicks(tag);
-                                batch.add(new ChunkTimeEntry(x, z, ticks, ChunkTerrainSampler.sample(tag)));
-                                if (batch.size() >= ScanResultPacket.MAX_RESULTS) {
-                                    sendBatch(player, batch);
-                                    batch = new ArrayList<>(ScanResultPacket.MAX_RESULTS);
-                                }
-                                if (++sampledChunks % 64 == 0) {
-                                    LockSupport.parkNanos(1_000_000L);
-                                }
-                            }
-                        } catch (IOException | RuntimeException ignored) {
-                            // Bad or locked chunks are skipped so one damaged entry does not abort the whole scan.
-                        }
-                    }
+        List<LevelChunk> chunks = new ArrayList<>();
+        for (int x = request.centerChunkX() - radius; x <= request.centerChunkX() + radius; x++) {
+            for (int z = request.centerChunkZ() - radius; z <= request.centerChunkZ() + radius; z++) {
+                LevelChunk chunk = level.getChunkSource().getChunkNow(x, z);
+                if (chunk != null) {
+                    chunks.add(chunk);
                 }
             }
-        } catch (IOException ignored) {
-            player.getServer().execute(() -> player.sendSystemMessage(Component.literal("MC Save Editor: scan failed to open region storage.")));
+        }
+        JOBS.removeIf(job -> job.player == player);
+        JOBS.add(new ScanJob(player, chunks));
+        player.sendSystemMessage(Component.literal("MC Save Editor: queued " + chunks.size() + " loaded chunks."));
+    }
+
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || JOBS.isEmpty()) {
             return;
         }
-
-        if (!batch.isEmpty()) {
-            sendBatch(player, batch);
+        ScanJob job = JOBS.peek();
+        try {
+            job.tick();
+            if (job.done()) {
+                JOBS.poll();
+                job.player.sendSystemMessage(Component.literal("MC Save Editor: scan complete."));
+            }
+        } catch (RuntimeException exception) {
+            JOBS.poll();
+            job.player.sendSystemMessage(Component.literal("MC Save Editor: scan failed: " + exception.getClass().getSimpleName()));
         }
-        player.getServer().execute(() -> player.sendSystemMessage(Component.literal("MC Save Editor: scan complete.")));
     }
 
     private static void sendBatch(ServerPlayer player, List<ChunkTimeEntry> batch) {
@@ -104,15 +70,30 @@ public final class ServerChunkScanService {
                 new ScanResultPacket(immutableBatch)));
     }
 
-    private static final class ScanThreadFactory implements ThreadFactory {
+    private static final class ScanJob {
+        private final ServerPlayer player;
+        private final List<LevelChunk> chunks;
         private int index;
 
-        @Override
-        public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "MCSaveEditor-Scan-" + index++);
-            thread.setDaemon(true);
-            thread.setPriority(Thread.MIN_PRIORITY);
-            return thread;
+        private ScanJob(ServerPlayer player, List<LevelChunk> chunks) {
+            this.player = player;
+            this.chunks = chunks;
+        }
+
+        private void tick() {
+            List<ChunkTimeEntry> batch = new ArrayList<>(CHUNKS_PER_TICK);
+            for (int count = 0; count < CHUNKS_PER_TICK && index < chunks.size(); count++, index++) {
+                LevelChunk chunk = chunks.get(index);
+                batch.add(new ChunkTimeEntry(chunk.getPos().x, chunk.getPos().z, chunk.getInhabitedTime(),
+                        ChunkTerrainSampler.sample(chunk)));
+            }
+            if (!batch.isEmpty()) {
+                sendBatch(player, batch);
+            }
+        }
+
+        private boolean done() {
+            return index >= chunks.size();
         }
     }
 }
