@@ -39,8 +39,10 @@ public class ChunkEditorScreen extends Screen {
 
     private EditBox radiusBox;
     private EditBox minutesBox;
+    private EditBox seedBox;
     private Checkbox radiusCheckbox;
     private Checkbox minutesCheckbox;
+    private Checkbox randomSeedCheckbox;
     private double panChunkX;
     private double panChunkZ;
     private double cellSize = 14.0D;
@@ -93,8 +95,17 @@ public class ChunkEditorScreen extends Screen {
                         button -> sendOperation(ChunkOperation.DELETE))
                 .bounds(x, y + 112, 188, 20)
                 .build());
+        randomSeedCheckbox = new Checkbox(x, y + 140, 92, 20, Component.literal("随机种子"), true);
+        addRenderableWidget(randomSeedCheckbox);
+        seedBox = new EditBox(font, x + 100, y + 140, 88, 20, Component.literal("目标种子"));
+        seedBox.setValue("0");
+        addRenderableWidget(seedBox);
+        addRenderableWidget(Button.builder(Component.literal("重建地形（过渡 8）"),
+                        button -> sendOperation(ChunkOperation.REGENERATE))
+                .bounds(x, y + 168, 142, 20)
+                .build());
         addRenderableWidget(Button.builder(Component.literal("关闭"), button -> onClose())
-                .bounds(x, y + 140, 188, 20)
+                .bounds(x + 148, y + 168, 40, 20)
                 .build());
     }
 
@@ -128,11 +139,10 @@ public class ChunkEditorScreen extends Screen {
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
         graphics.drawString(font, "MC 存档区块编辑器", 12, 14, 0xFFFFFFFF);
         graphics.drawString(font, "筛选条件（勾选后生效）", 12, 28, 0xFFBFC5D2);
-        graphics.drawString(font, "已选择：" + selected.size(), 12, 214, 0xFFFFFFFF);
-        graphics.drawString(font, "扫描结果：" + scanned.size(), 12, 228, 0xFFBFC5D2);
-        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 242, 0xFFF2C230);
-        graphics.drawString(font, "中心区块：" + centerChunkX + ", " + centerChunkZ, 12, 264, 0xFFBFC5D2);
-        graphics.drawString(font, "缩放：" + Math.round(cellSize) + " 像素", 12, 278, 0xFFBFC5D2);
+        graphics.drawString(font, "已选择：" + selected.size() + "  扫描：" + scanned.size(), 12, 238, 0xFFFFFFFF);
+        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 252, 0xFFF2C230);
+        graphics.drawString(font, "中心：" + centerChunkX + ", " + centerChunkZ
+                + "  缩放：" + Math.round(cellSize), 12, 266, 0xFFBFC5D2);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -416,7 +426,16 @@ public class ChunkEditorScreen extends Screen {
         for (long key : selected) {
             chunks.add(new ChunkPos((int) key, (int) (key >> 32)));
         }
-        ModNetworking.CHANNEL.sendToServer(new DeleteChunksPacket(operation, chunks));
+        long seed = 0L;
+        if (operation == ChunkOperation.REGENERATE && !randomSeedCheckbox.selected()) {
+            try {
+                seed = Long.parseLong(seedBox.getValue().trim());
+            } catch (NumberFormatException ignored) {
+                return;
+            }
+        }
+        boolean randomSeed = operation == ChunkOperation.REGENERATE && randomSeedCheckbox.selected();
+        ModNetworking.CHANNEL.sendToServer(new DeleteChunksPacket(operation, chunks, randomSeed, seed));
     }
 
     private int parsePositive(String value, int fallback) {
