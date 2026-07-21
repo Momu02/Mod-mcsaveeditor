@@ -147,7 +147,7 @@ final class ChunkTerrainMerger {
         positions.addAll(old.keySet());
         positions.addAll(generatedNew.keySet());
 
-        for (BlockPos pos : new HashSet<>(newTerrain.getBlockEntities().keySet())) {
+        for (BlockPos pos : new HashSet<>(((LevelChunk) newTerrain).getBlockEntities().keySet())) {
             newTerrain.removeBlockEntity(pos);
         }
 
@@ -186,7 +186,7 @@ final class ChunkTerrainMerger {
 
     private static Map<BlockPos, CompoundTag> saveBlockEntities(ChunkAccess chunk) {
         Map<BlockPos, CompoundTag> result = new HashMap<>();
-        for (Map.Entry<BlockPos, BlockEntity> entry : chunk.getBlockEntities().entrySet()) {
+        for (Map.Entry<BlockPos, BlockEntity> entry : ((LevelChunk) chunk).getBlockEntities().entrySet()) {
             result.put(entry.getKey(), entry.getValue().saveWithFullMetadata());
         }
         return result;

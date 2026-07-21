@@ -3,7 +3,6 @@ package com.mcsaveeditor.server;
 import net.minecraft.Util;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.progress.ChunkProgressListener;
-import net.minecraft.util.thread.BlockableEventLoop;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -13,6 +12,7 @@ import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.PrimaryLevelData;
 import net.minecraft.world.level.storage.ServerLevelData;
+import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -81,24 +81,26 @@ final class TerrainRegenerationSession implements AutoCloseable {
         synchronized (WORLD_OPTIONS_LOCK) {
             PrimaryLevelData worldData = (PrimaryLevelData) source.getServer().getWorldData().overworldData();
             WorldOptions originalOptions = worldData.worldGenOptions();
+            WorldOptions seededOptions = originalOptions.withSeed(OptionalLong.of(seed));
             try {
-                worldData.worldOptions = originalOptions.withSeed(OptionalLong.of(seed));
+                ObfuscationReflectionHelper.setPrivateValue(
+                        PrimaryLevelData.class, worldData, seededOptions, "worldOptions");
                 return new ServerLevel(
                         source.getServer(), Util.backgroundExecutor(), access,
                         (ServerLevelData) source.getLevelData(), source.dimension(),
                         new LevelStem(source.dimensionTypeRegistration(), source.getChunkSource().getGenerator()),
                         NO_PROGRESS, source.isDebug(), seed, List.of(), false, source.getRandomSequences());
             } finally {
-                worldData.worldOptions = originalOptions;
+                ObfuscationReflectionHelper.setPrivateValue(
+                        PrimaryLevelData.class, worldData, originalOptions, "worldOptions");
             }
         }
     }
 
     private ChunkAccess generate(ServerLevel world, ChunkPos pos) {
         var future =
-                world.getChunkSource().getChunkFutureMainThread(pos.x, pos.z, ChunkStatus.FEATURES, true);
-        BlockableEventLoop<Runnable> executor = world.getChunkSource().mainThreadProcessor;
-        executor.managedBlock(future::isDone);
+                world.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FEATURES, true);
+        world.getServer().managedBlock(future::isDone);
         return future.join().left().orElseThrow(() -> new IllegalStateException("无法生成区块 " + pos));
     }
 
