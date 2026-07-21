@@ -15,7 +15,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 import java.util.Optional;
 
 public final class ModNetworking {
-    private static final String PROTOCOL = "5";
+    private static final String PROTOCOL = "6";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.ChannelBuilder
             .named(new ResourceLocation(MCSaveEditorMod.MOD_ID, "main"))

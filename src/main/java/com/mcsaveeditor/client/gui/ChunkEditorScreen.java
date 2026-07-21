@@ -9,6 +9,7 @@ import com.mcsaveeditor.network.packet.ScanRequestPacket;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -22,7 +23,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class ChunkEditorScreen extends Screen {
-    private static final int SIDEBAR_WIDTH = 188;
+    private static final int SIDEBAR_WIDTH = 224;
     private static final int MIN_CELL = 4;
     private static final int MAX_CELL = 48;
     private static final int GRID_LINE_COLOR = 0x55303030;
@@ -38,6 +39,8 @@ public class ChunkEditorScreen extends Screen {
 
     private EditBox radiusBox;
     private EditBox minutesBox;
+    private Checkbox radiusCheckbox;
+    private Checkbox minutesCheckbox;
     private double panChunkX;
     private double panChunkZ;
     private double cellSize = 14.0D;
@@ -50,7 +53,7 @@ public class ChunkEditorScreen extends Screen {
     private int dragEndChunkZ;
 
     public ChunkEditorScreen(int centerChunkX, int centerChunkZ) {
-        super(Component.literal("MC Save Editor"));
+        super(Component.literal("MC 存档区块编辑器"));
         this.centerChunkX = centerChunkX;
         this.centerChunkZ = centerChunkZ;
     }
@@ -58,34 +61,40 @@ public class ChunkEditorScreen extends Screen {
     @Override
     protected void init() {
         int x = 12;
-        int y = 44;
+        int y = 42;
 
-        radiusBox = new EditBox(font, x, y, 72, 20, Component.literal("Radius"));
+        radiusCheckbox = new Checkbox(x, y, 92, 20, Component.literal("限制范围"), false);
+        addRenderableWidget(radiusCheckbox);
+
+        radiusBox = new EditBox(font, x + 100, y, 88, 20, Component.literal("区块半径"));
         radiusBox.setValue("128");
         addRenderableWidget(radiusBox);
 
-        minutesBox = new EditBox(font, x + 84, y, 72, 20, Component.literal("Minutes"));
+        minutesCheckbox = new Checkbox(x, y + 26, 92, 20, Component.literal("限制时间"), false);
+        addRenderableWidget(minutesCheckbox);
+
+        minutesBox = new EditBox(font, x + 100, y + 26, 88, 20, Component.literal("最长停留分钟"));
         minutesBox.setValue("5");
         addRenderableWidget(minutesBox);
 
-        addRenderableWidget(Button.builder(Component.literal("Scan"), button -> sendScan())
-                .bounds(x, y + 28, 72, 20)
+        addRenderableWidget(Button.builder(Component.literal("扫描区块"), button -> sendScan())
+                .bounds(x, y + 56, 92, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), button -> sendCancelScan())
-                .bounds(x + 84, y + 28, 72, 20)
+        addRenderableWidget(Button.builder(Component.literal("取消扫描"), button -> sendCancelScan())
+                .bounds(x + 100, y + 56, 88, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Clear"), button -> selected.clear())
-                .bounds(x, y + 56, 72, 20)
+        addRenderableWidget(Button.builder(Component.literal("清除选择"), button -> selected.clear())
+                .bounds(x, y + 84, 92, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Update"), button -> sendOperation(ChunkOperation.UPDATE))
-                .bounds(x + 84, y + 56, 72, 20)
+        addRenderableWidget(Button.builder(Component.literal("升级区块数据"), button -> sendOperation(ChunkOperation.UPDATE))
+                .bounds(x + 100, y + 84, 88, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Delete Completely").withStyle(ChatFormatting.RED),
+        addRenderableWidget(Button.builder(Component.literal("彻底删除所选区块").withStyle(ChatFormatting.RED),
                         button -> sendOperation(ChunkOperation.DELETE))
-                .bounds(x, y + 84, 156, 20)
+                .bounds(x, y + 112, 188, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Close"), button -> onClose())
-                .bounds(x, y + 112, 156, 20)
+        addRenderableWidget(Button.builder(Component.literal("关闭"), button -> onClose())
+                .bounds(x, y + 140, 188, 20)
                 .build());
     }
 
@@ -93,9 +102,6 @@ public class ChunkEditorScreen extends Screen {
         for (ChunkTimeEntry entry : entries) {
             long key = ChunkPos.asLong(entry.chunkX(), entry.chunkZ());
             scanned.put(key, entry);
-            if (!entry.protectedChunk()) {
-                selected.add(key);
-            }
         }
     }
 
@@ -120,13 +126,13 @@ public class ChunkEditorScreen extends Screen {
     private void renderSidebar(GuiGraphics graphics) {
         graphics.fill(0, 0, SIDEBAR_WIDTH, height, 0xE81B1D22);
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
-        graphics.drawString(font, "MC Save Editor", 12, 14, 0xFFFFFFFF);
-        graphics.drawString(font, "Radius / max inhabited min", 12, 32, 0xFFBFC5D2);
-        graphics.drawString(font, "Selected: " + selected.size(), 12, 188, 0xFFFFFFFF);
-        graphics.drawString(font, "Matched: " + scanned.size(), 12, 202, 0xFFBFC5D2);
-        graphics.drawString(font, "Yellow: protected", 12, 216, 0xFFF2C230);
-        graphics.drawString(font, "Center: " + centerChunkX + ", " + centerChunkZ, 12, 238, 0xFFBFC5D2);
-        graphics.drawString(font, "Zoom: " + Math.round(cellSize) + " px", 12, 252, 0xFFBFC5D2);
+        graphics.drawString(font, "MC 存档区块编辑器", 12, 14, 0xFFFFFFFF);
+        graphics.drawString(font, "筛选条件（勾选后生效）", 12, 28, 0xFFBFC5D2);
+        graphics.drawString(font, "已选择：" + selected.size(), 12, 214, 0xFFFFFFFF);
+        graphics.drawString(font, "扫描结果：" + scanned.size(), 12, 228, 0xFFBFC5D2);
+        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 242, 0xFFF2C230);
+        graphics.drawString(font, "中心区块：" + centerChunkX + ", " + centerChunkZ, 12, 264, 0xFFBFC5D2);
+        graphics.drawString(font, "缩放：" + Math.round(cellSize) + " 像素", 12, 278, 0xFFBFC5D2);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -374,7 +380,7 @@ public class ChunkEditorScreen extends Screen {
             for (int z = minZ; z <= maxZ; z++) {
                 long key = ChunkPos.asLong(x, z);
                 ChunkTimeEntry entry = scanned.get(key);
-                if (entry != null && entry.protectedChunk()) {
+                if (entry == null || entry.protectedChunk()) {
                     continue;
                 }
                 if (add) {
@@ -391,7 +397,8 @@ public class ChunkEditorScreen extends Screen {
         int minutes = parseNonNegative(minutesBox.getValue(), 5);
         scanned.clear();
         selected.clear();
-        ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ, radius, minutes));
+        ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ,
+                radiusCheckbox.selected(), radius, minutesCheckbox.selected(), minutes));
     }
 
     private void sendCancelScan() {

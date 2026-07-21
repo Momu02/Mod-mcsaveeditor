@@ -8,8 +8,8 @@ Forge 1.20.1 dual-side mod for in-game saved-chunk visualization, filtering, dat
 2. Install the jar on both client and server.
 3. Run `/mcsaveeditor open` as an operator with permission level 3 or higher.
 4. In the GUI:
-   - Set scan radius and maximum inhabited minutes, then click `Scan`. Only saved chunks at or below that `InhabitedTime` threshold are returned and selected automatically.
-   - Generated chunks receive an 8x8 terrain preview. Selection can still be adjusted manually.
+   - Enable the range and inhabited-time filters as needed, then click scan. A filter is ignored unless its checkbox is enabled.
+   - Generated chunks receive an 8x8 terrain preview. Scan results are not selected automatically.
    - Left drag selects chunks, right drag removes chunks, middle drag pans, wheel zooms.
    - Click `Update` to run Minecraft's current chunk data fixer without removing blocks, block entities, entities, or POI data.
    - Click `Delete Completely` to remove the chunk from terrain, POI, and entity region storage. The chunk is generated again when it is next visited.
@@ -23,7 +23,7 @@ Forge 1.20.1 dual-side mod for in-game saved-chunk visualization, filtering, dat
   - forced chunk state is disabled,
   - no player is within the guarded view-distance range,
   - `ServerChunkCache#hasChunk(x, z)` reports that it is not currently loaded.
-- Complete deletion removes the chunk slot from `region`, `poi`, and `entities` storage, resetting the target to an ungenerated state for future terrain generation. Anvil region files allocate 32x32 chunks, so deleting individual chunks frees reusable sectors but only deleting every chunk in a region can remove the whole `.mca` file.
+- Complete deletion removes the chunk slot from `region`, `poi`, and `entities` storage, resetting the target to an ungenerated state for future terrain generation. The live server uses its own chunk storage queue for terrain deletion so a later save cannot restore stale data. Physical `.mca` compaction requires an offline tool because the running server keeps region files open.
 - Updating a chunk means upgrading its stored NBT to the current Minecraft data version. Minecraft cannot regenerate arbitrary terrain at the same coordinates while also guaranteeing that overlapping player-built blocks remain unchanged.
 
 ## Important Files

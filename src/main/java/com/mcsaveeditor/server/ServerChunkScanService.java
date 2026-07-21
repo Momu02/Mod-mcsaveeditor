@@ -14,15 +14,21 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Queue;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 public final class ServerChunkScanService {
     private static final Queue<ScanJob> JOBS = new ArrayDeque<>();
     private static final int CHUNKS_PER_TICK = 32;
+    private static final Pattern REGION_FILE = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
 
     private ServerChunkScanService() {
     }
@@ -43,8 +49,9 @@ public final class ServerChunkScanService {
             protectedAreas.add(new ProtectedArea(onlinePlayer.chunkPosition(), guardDistance));
         }
 
-        ScanJob job = new ScanJob(player, WorldStoragePaths.chunkRegion(level),
-                request.centerChunkX(), request.centerChunkZ(), radius, maxInhabitedTicks, protectedAreas);
+        ScanJob job = new ScanJob(player, WorldStoragePaths.chunkRegion(level), request.centerChunkX(),
+                request.centerChunkZ(), request.limitRadius(), radius, request.limitInhabitedTime(),
+                maxInhabitedTicks, protectedAreas);
         JOBS.removeIf(existing -> {
             if (existing.player == player) {
                 existing.close();
@@ -53,7 +60,7 @@ public final class ServerChunkScanService {
             return false;
         });
         JOBS.add(job);
-        player.sendSystemMessage(Component.literal("MC Save Editor: scanning saved chunks in the requested area..."));
+        player.sendSystemMessage(Component.literal("MC 存档区块编辑器：正在扫描已有区块……"));
     }
 
     public static void cancelScan(ServerPlayer player, boolean notify) {
@@ -65,7 +72,7 @@ public final class ServerChunkScanService {
             return false;
         });
         if (cancelled && notify) {
-            player.sendSystemMessage(Component.literal("MC Save Editor: scan cancelled."));
+            player.sendSystemMessage(Component.literal("MC 存档区块编辑器：已取消扫描。"));
         }
     }
 
@@ -79,12 +86,13 @@ public final class ServerChunkScanService {
             if (job.done()) {
                 JOBS.poll();
                 job.close();
-                job.player.sendSystemMessage(Component.literal("MC Save Editor: scan complete. Found " + job.found + " saved chunks."));
+                job.player.sendSystemMessage(Component.literal("MC 存档区块编辑器：扫描完成，共找到 " + job.found + " 个区块。"));
             }
         } catch (IOException | RuntimeException exception) {
             JOBS.poll();
             job.close();
-            job.player.sendSystemMessage(Component.literal("MC Save Editor: scan failed: " + exception.getClass().getSimpleName()));
+            job.player.sendSystemMessage(Component.literal("MC 存档区块编辑器：扫描失败："
+                    + exception.getClass().getSimpleName()));
         }
     }
 
@@ -103,26 +111,32 @@ public final class ServerChunkScanService {
         private final Path regionPath;
         private final int centerX;
         private final int centerZ;
+        private final boolean limitRadius;
         private final int radius;
+        private final boolean limitInhabitedTime;
         private final long maxInhabitedTicks;
         private final List<ProtectedArea> protectedAreas;
+        private final List<RegionPos> regions;
         private RegionFileStorage storage;
-        private int x;
-        private int z;
+        private int regionIndex;
+        private int localIndex;
         private int found;
         private boolean finished;
 
-        private ScanJob(ServerPlayer player, Path regionPath, int centerX, int centerZ, int radius, long maxInhabitedTicks,
+        private ScanJob(ServerPlayer player, Path regionPath, int centerX, int centerZ, boolean limitRadius,
+                        int radius, boolean limitInhabitedTime, long maxInhabitedTicks,
                         List<ProtectedArea> protectedAreas) {
             this.player = player;
             this.regionPath = regionPath;
             this.centerX = centerX;
             this.centerZ = centerZ;
+            this.limitRadius = limitRadius;
             this.radius = radius;
+            this.limitInhabitedTime = limitInhabitedTime;
             this.maxInhabitedTicks = maxInhabitedTicks;
             this.protectedAreas = protectedAreas;
-            this.x = centerX - radius;
-            this.z = centerZ - radius;
+            this.regions = listRegions(regionPath, centerX, centerZ, limitRadius, radius);
+            this.finished = regions.isEmpty();
         }
 
         private void tick() throws IOException {
@@ -136,12 +150,15 @@ public final class ServerChunkScanService {
             List<ChunkTimeEntry> batch = new ArrayList<>(CHUNKS_PER_TICK);
             int processed = 0;
             while (processed++ < CHUNKS_PER_TICK && !finished) {
+                RegionPos region = regions.get(regionIndex);
+                int x = (region.x() << 5) + (localIndex & 31);
+                int z = (region.z() << 5) + (localIndex >> 5);
                 ChunkPos pos = new ChunkPos(x, z);
-                if (AnvilChunkIo.regionFileExists(regionPath, pos)) {
+                if (!limitRadius || Math.abs(x - centerX) <= radius && Math.abs(z - centerZ) <= radius) {
                     net.minecraft.nbt.CompoundTag tag = storage.read(pos);
                     if (tag != null && !tag.isEmpty()) {
                         long inhabitedTicks = AnvilChunkIo.readInhabitedTicks(tag);
-                        if (inhabitedTicks > maxInhabitedTicks) {
+                        if (limitInhabitedTime && inhabitedTicks > maxInhabitedTicks) {
                             advance();
                             continue;
                         }
@@ -159,9 +176,9 @@ public final class ServerChunkScanService {
         }
 
         private void advance() {
-            if (++z > centerZ + radius) {
-                z = centerZ - radius;
-                if (++x > centerX + radius) {
+            if (++localIndex >= 32 * 32) {
+                localIndex = 0;
+                if (++regionIndex >= regions.size()) {
                     finished = true;
                 }
             }
@@ -178,6 +195,43 @@ public final class ServerChunkScanService {
                 } catch (IOException ignored) {
                 }
             }
+        }
+    }
+
+    private static List<RegionPos> listRegions(Path regionPath, int centerX, int centerZ,
+                                               boolean limitRadius, int radius) {
+        if (!Files.isDirectory(regionPath)) {
+            return List.of();
+        }
+        try (Stream<Path> files = Files.list(regionPath)) {
+            return files.map(path -> parseRegion(path.getFileName().toString()))
+                    .filter(java.util.Objects::nonNull)
+                    .filter(region -> !limitRadius || region.intersects(centerX, centerZ, radius))
+                    .sorted(Comparator.comparingInt(RegionPos::x).thenComparingInt(RegionPos::z))
+                    .toList();
+        } catch (IOException exception) {
+            return List.of();
+        }
+    }
+
+    private static RegionPos parseRegion(String fileName) {
+        Matcher matcher = REGION_FILE.matcher(fileName);
+        if (!matcher.matches()) {
+            return null;
+        }
+        try {
+            return new RegionPos(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)));
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    private record RegionPos(int x, int z) {
+        boolean intersects(int centerX, int centerZ, int radius) {
+            int minX = x << 5;
+            int minZ = z << 5;
+            return minX <= centerX + radius && minX + 31 >= centerX - radius
+                    && minZ <= centerZ + radius && minZ + 31 >= centerZ - radius;
         }
     }
 }
