@@ -35,6 +35,8 @@ public final class ServerChunkScanService {
 
         ServerLevel level = player.serverLevel();
         int radius = Math.min(Math.max(request.radiusChunks(), 1), ScanRequestPacket.MAX_RADIUS);
+        int maxInhabitedMinutes = Math.max(request.maxInhabitedMinutes(), 0);
+        long maxInhabitedTicks = Math.min((long) maxInhabitedMinutes * 1200L, Long.MAX_VALUE);
         List<ProtectedArea> protectedAreas = new ArrayList<>();
         int guardDistance = level.getServer().getPlayerList().getViewDistance() + 2;
         for (ServerPlayer onlinePlayer : level.players()) {
@@ -42,7 +44,7 @@ public final class ServerChunkScanService {
         }
 
         ScanJob job = new ScanJob(player, WorldStoragePaths.chunkRegion(level),
-                request.centerChunkX(), request.centerChunkZ(), radius, protectedAreas);
+                request.centerChunkX(), request.centerChunkZ(), radius, maxInhabitedTicks, protectedAreas);
         JOBS.removeIf(existing -> {
             if (existing.player == player) {
                 existing.close();
@@ -102,6 +104,7 @@ public final class ServerChunkScanService {
         private final int centerX;
         private final int centerZ;
         private final int radius;
+        private final long maxInhabitedTicks;
         private final List<ProtectedArea> protectedAreas;
         private RegionFileStorage storage;
         private int x;
@@ -109,13 +112,14 @@ public final class ServerChunkScanService {
         private int found;
         private boolean finished;
 
-        private ScanJob(ServerPlayer player, Path regionPath, int centerX, int centerZ, int radius,
+        private ScanJob(ServerPlayer player, Path regionPath, int centerX, int centerZ, int radius, long maxInhabitedTicks,
                         List<ProtectedArea> protectedAreas) {
             this.player = player;
             this.regionPath = regionPath;
             this.centerX = centerX;
             this.centerZ = centerZ;
             this.radius = radius;
+            this.maxInhabitedTicks = maxInhabitedTicks;
             this.protectedAreas = protectedAreas;
             this.x = centerX - radius;
             this.z = centerZ - radius;
@@ -136,8 +140,13 @@ public final class ServerChunkScanService {
                 if (AnvilChunkIo.regionFileExists(regionPath, pos)) {
                     net.minecraft.nbt.CompoundTag tag = storage.read(pos);
                     if (tag != null && !tag.isEmpty()) {
+                        long inhabitedTicks = AnvilChunkIo.readInhabitedTicks(tag);
+                        if (inhabitedTicks > maxInhabitedTicks) {
+                            advance();
+                            continue;
+                        }
                         boolean protectedChunk = protectedAreas.stream().anyMatch(area -> area.contains(pos));
-                        batch.add(new ChunkTimeEntry(x, z, AnvilChunkIo.readInhabitedTicks(tag),
+                        batch.add(new ChunkTimeEntry(x, z, inhabitedTicks,
                                 ChunkTerrainSampler.sample(tag), protectedChunk));
                         found++;
                     }

@@ -21,7 +21,7 @@ public final class ClientPacketHandlers {
 
     public static void handleDeletedChunks(DeletedChunksPacket packet) {
         if (Minecraft.getInstance().screen instanceof ChunkEditorScreen screen) {
-            screen.acceptDeletedChunks(packet.chunks());
+            screen.acceptProcessedChunks(packet.operation(), packet.chunks());
         }
     }
 }

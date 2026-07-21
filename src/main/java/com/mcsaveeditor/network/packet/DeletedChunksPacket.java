@@ -11,10 +11,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-public record DeletedChunksPacket(List<ChunkPos> chunks) {
+public record DeletedChunksPacket(ChunkOperation operation, List<ChunkPos> chunks) {
     public static final int MAX_RESULTS = 256;
 
     public static void encode(DeletedChunksPacket packet, FriendlyByteBuf buf) {
+        buf.writeEnum(packet.operation);
         int size = Math.min(packet.chunks.size(), MAX_RESULTS);
         buf.writeVarInt(size);
         for (int i = 0; i < size; i++) {
@@ -25,12 +26,13 @@ public record DeletedChunksPacket(List<ChunkPos> chunks) {
     }
 
     public static DeletedChunksPacket decode(FriendlyByteBuf buf) {
+        ChunkOperation operation = buf.readEnum(ChunkOperation.class);
         int size = Math.min(buf.readVarInt(), MAX_RESULTS);
         List<ChunkPos> chunks = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             chunks.add(new ChunkPos(buf.readVarInt(), buf.readVarInt()));
         }
-        return new DeletedChunksPacket(chunks);
+        return new DeletedChunksPacket(operation, chunks);
     }
 
     public static void handle(DeletedChunksPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {

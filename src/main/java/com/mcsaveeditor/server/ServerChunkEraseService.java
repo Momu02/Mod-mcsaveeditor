@@ -3,7 +3,11 @@ package com.mcsaveeditor.server;
 import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.network.packet.DeleteChunksPacket;
 import com.mcsaveeditor.network.packet.DeletedChunksPacket;
+import com.mcsaveeditor.network.packet.ChunkOperation;
 import net.minecraft.ChatFormatting;
+import net.minecraft.SharedConstants;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
 import net.minecraft.server.level.ServerChunkCache;
@@ -11,6 +15,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
+import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
 
@@ -40,11 +45,12 @@ public final class ServerChunkEraseService {
             return;
         }
 
-        ServerLevel level = player.serverLevel();
+            ServerLevel level = player.serverLevel();
         List<ChunkPos> distinct = packet.chunks().stream().distinct().limit(DeleteChunksPacket.MAX_DELETE_COUNT).toList();
         ServerChunkScanService.cancelScan(player, false);
-        JOBS.add(new EraseJob(level, distinct));
-        player.sendSystemMessage(Component.literal("MC Save Editor: queued " + distinct.size() + " chunks for safe erase."));
+        JOBS.add(new EraseJob(level, packet.operation(), distinct));
+        player.sendSystemMessage(Component.literal("MC Save Editor: queued " + distinct.size() + " chunks for "
+                + operationName(packet.operation()) + "."));
     }
 
     public static void onServerTick(TickEvent.ServerTickEvent event) {
@@ -61,13 +67,19 @@ public final class ServerChunkEraseService {
         if (job.isDone()) {
             JOBS.poll();
             job.level.getServer().getPlayerList().broadcastSystemMessage(
-                    Component.literal("MC Save Editor: erase complete. Deleted " + job.deleted + ", skipped " + job.skipped + "."),
+                    Component.literal("MC Save Editor: " + operationName(job.operation) + " complete. Processed "
+                            + job.processed + ", skipped " + job.skipped + "."),
                     false);
         }
     }
 
+    private static String operationName(ChunkOperation operation) {
+        return operation == ChunkOperation.UPDATE ? "chunk update" : "complete deletion";
+    }
+
     private static final class EraseJob {
         private final ServerLevel level;
+        private final ChunkOperation operation;
         private final Queue<PendingChunk> queue = new ArrayDeque<>();
         private final Path chunkRegionPath;
         private final Path poiRegionPath;
@@ -75,11 +87,13 @@ public final class ServerChunkEraseService {
         private final RegionFileStorage chunkStorage;
         private final RegionFileStorage poiStorage;
         private final RegionFileStorage entityStorage;
-        private int deleted;
+        private final Set<Long> affectedRegions = new HashSet<>();
+        private int processed;
         private int skipped;
 
-        private EraseJob(ServerLevel level, List<ChunkPos> chunks) {
+        private EraseJob(ServerLevel level, ChunkOperation operation, List<ChunkPos> chunks) {
             this.level = level;
+            this.operation = operation;
             this.chunkRegionPath = WorldStoragePaths.chunkRegion(level);
             this.poiRegionPath = WorldStoragePaths.poiRegion(level);
             this.entityRegionPath = WorldStoragePaths.entityRegion(level);
@@ -91,13 +105,14 @@ public final class ServerChunkEraseService {
             for (ChunkPos pos : chunks) {
                 if (seen.add(pos.toLong())) {
                     queue.add(new PendingChunk(pos));
+                    affectedRegions.add(ChunkPos.asLong(pos.getRegionX(), pos.getRegionZ()));
                 }
             }
             level.getChunkSource().save(true);
         }
 
         private void tick() {
-            List<ChunkPos> erased = new ArrayList<>(CHUNKS_PER_TICK);
+            List<ChunkPos> completed = new ArrayList<>(CHUNKS_PER_TICK);
             int processed = 0;
             while (processed++ < CHUNKS_PER_TICK && !queue.isEmpty()) {
                 PendingChunk pending = queue.poll();
@@ -105,12 +120,12 @@ public final class ServerChunkEraseService {
                     continue;
                 }
                 if (process(pending)) {
-                    erased.add(pending.pos);
+                    completed.add(pending.pos);
                 }
             }
-            if (!erased.isEmpty()) {
+            if (!completed.isEmpty()) {
                 ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
-                        new DeletedChunksPacket(List.copyOf(erased)));
+                        new DeletedChunksPacket(operation, List.copyOf(completed)));
             }
         }
 
@@ -121,7 +136,7 @@ public final class ServerChunkEraseService {
             level.setChunkForced(pos.x, pos.z, false);
 
             if (isNearAnyPlayer(pos)) {
-                skipped++;
+                deferOrSkip(pending);
                 return false;
             }
 
@@ -135,9 +150,9 @@ public final class ServerChunkEraseService {
             }
 
             try {
-                if (eraseIfPresent(pos)) {
+                if (processStoredChunk(pos)) {
                     forgetClientChunk(pos);
-                    deleted++;
+                    processed++;
                     return true;
                 } else {
                     skipped++;
@@ -147,6 +162,49 @@ public final class ServerChunkEraseService {
                 skipped++;
             }
             return false;
+        }
+
+        private void deferOrSkip(PendingChunk pending) {
+            if (pending.retries++ < MAX_RETRIES) {
+                queue.add(pending);
+            } else {
+                skipped++;
+            }
+        }
+
+        private boolean processStoredChunk(ChunkPos pos) throws IOException {
+            if (operation == ChunkOperation.UPDATE) {
+                return updateIfPresent(pos);
+            }
+            return eraseIfPresent(pos);
+        }
+
+        private boolean updateIfPresent(ChunkPos pos) throws IOException {
+            boolean present = updateStorageIfPresent(chunkStorage, chunkRegionPath, pos, DataFixTypes.CHUNK);
+            present |= updateStorageIfPresent(poiStorage, poiRegionPath, pos, DataFixTypes.POI_CHUNK);
+            present |= updateStorageIfPresent(entityStorage, entityRegionPath, pos, DataFixTypes.ENTITY_CHUNK);
+            chunkStorage.flush();
+            poiStorage.flush();
+            entityStorage.flush();
+            return present;
+        }
+
+        private boolean updateStorageIfPresent(RegionFileStorage storage, Path regionPath, ChunkPos pos,
+                                               DataFixTypes dataFixType) throws IOException {
+            if (!AnvilChunkIo.regionFileExists(regionPath, pos)) {
+                return false;
+            }
+            CompoundTag tag = storage.read(pos);
+            if (tag == null || tag.isEmpty()) {
+                return false;
+            }
+
+            int oldVersion = NbtUtils.getDataVersion(tag, -1);
+            int currentVersion = SharedConstants.getCurrentVersion().getDataVersion().getVersion();
+            CompoundTag updated = dataFixType.updateToCurrentVersion(level.getServer().getFixerUpper(), tag, oldVersion);
+            updated.putInt("DataVersion", currentVersion);
+            AnvilChunkIo.writeChunk(storage, pos, updated);
+            return true;
         }
 
         private boolean eraseIfPresent(ChunkPos pos) throws IOException {
@@ -203,9 +261,30 @@ public final class ServerChunkEraseService {
                 flushAndClose(chunkStorage);
                 flushAndClose(poiStorage);
                 flushAndClose(entityStorage);
+                if (operation == ChunkOperation.DELETE) {
+                    compactAffectedRegions();
+                }
                 return true;
             }
             return false;
+        }
+
+        private void compactAffectedRegions() {
+            for (long region : affectedRegions) {
+                int regionX = (int) region;
+                int regionZ = (int) (region >> 32);
+                compactQuietly(chunkRegionPath, regionX, regionZ);
+                compactQuietly(poiRegionPath, regionX, regionZ);
+                compactQuietly(entityRegionPath, regionX, regionZ);
+            }
+        }
+
+        private static void compactQuietly(Path regionPath, int regionX, int regionZ) {
+            try {
+                AnvilChunkIo.compactRegion(regionPath, regionX, regionZ);
+            } catch (IOException ignored) {
+                // The chunk slots were already cleared; a later save can compact the file again.
+            }
         }
 
         private static RegionFileStorage openStorage(Path path) {

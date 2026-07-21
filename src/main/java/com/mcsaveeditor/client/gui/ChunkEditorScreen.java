@@ -3,6 +3,7 @@ package com.mcsaveeditor.client.gui;
 import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.network.packet.CancelScanPacket;
 import com.mcsaveeditor.network.packet.ChunkTimeEntry;
+import com.mcsaveeditor.network.packet.ChunkOperation;
 import com.mcsaveeditor.network.packet.DeleteChunksPacket;
 import com.mcsaveeditor.network.packet.ScanRequestPacket;
 import net.minecraft.ChatFormatting;
@@ -36,6 +37,7 @@ public class ChunkEditorScreen extends Screen {
     private final Set<Long> selected = new HashSet<>();
 
     private EditBox radiusBox;
+    private EditBox minutesBox;
     private double panChunkX;
     private double panChunkZ;
     private double cellSize = 14.0D;
@@ -62,21 +64,28 @@ public class ChunkEditorScreen extends Screen {
         radiusBox.setValue("128");
         addRenderableWidget(radiusBox);
 
-        addRenderableWidget(Button.builder(Component.literal("Cancel Scan"), button -> sendCancelScan())
-                .bounds(x + 84, y, 72, 20)
-                .build());
+        minutesBox = new EditBox(font, x + 84, y, 72, 20, Component.literal("Minutes"));
+        minutesBox.setValue("5");
+        addRenderableWidget(minutesBox);
 
         addRenderableWidget(Button.builder(Component.literal("Scan"), button -> sendScan())
                 .bounds(x, y + 28, 72, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Clear"), button -> selected.clear())
+        addRenderableWidget(Button.builder(Component.literal("Cancel"), button -> sendCancelScan())
                 .bounds(x + 84, y + 28, 72, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("Confirm Delete").withStyle(ChatFormatting.RED), button -> sendDelete())
-                .bounds(x, y + 64, 156, 20)
+        addRenderableWidget(Button.builder(Component.literal("Clear"), button -> selected.clear())
+                .bounds(x, y + 56, 72, 20)
+                .build());
+        addRenderableWidget(Button.builder(Component.literal("Update"), button -> sendOperation(ChunkOperation.UPDATE))
+                .bounds(x + 84, y + 56, 72, 20)
+                .build());
+        addRenderableWidget(Button.builder(Component.literal("Delete Completely").withStyle(ChatFormatting.RED),
+                        button -> sendOperation(ChunkOperation.DELETE))
+                .bounds(x, y + 84, 156, 20)
                 .build());
         addRenderableWidget(Button.builder(Component.literal("Close"), button -> onClose())
-                .bounds(x, y + 92, 156, 20)
+                .bounds(x, y + 112, 156, 20)
                 .build());
     }
 
@@ -84,13 +93,18 @@ public class ChunkEditorScreen extends Screen {
         for (ChunkTimeEntry entry : entries) {
             long key = ChunkPos.asLong(entry.chunkX(), entry.chunkZ());
             scanned.put(key, entry);
+            if (!entry.protectedChunk()) {
+                selected.add(key);
+            }
         }
     }
 
-    public void acceptDeletedChunks(List<ChunkPos> chunks) {
+    public void acceptProcessedChunks(ChunkOperation operation, List<ChunkPos> chunks) {
         for (ChunkPos pos : chunks) {
             long key = pos.toLong();
-            scanned.remove(key);
+            if (operation == ChunkOperation.DELETE) {
+                scanned.remove(key);
+            }
             selected.remove(key);
         }
     }
@@ -107,12 +121,12 @@ public class ChunkEditorScreen extends Screen {
         graphics.fill(0, 0, SIDEBAR_WIDTH, height, 0xE81B1D22);
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
         graphics.drawString(font, "MC Save Editor", 12, 14, 0xFFFFFFFF);
-        graphics.drawString(font, "Scan radius (saved chunks)", 12, 32, 0xFFBFC5D2);
-        graphics.drawString(font, "Selected: " + selected.size(), 12, 168, 0xFFFFFFFF);
-        graphics.drawString(font, "Scanned: " + scanned.size(), 12, 182, 0xFFBFC5D2);
-        graphics.drawString(font, "Yellow: protected", 12, 196, 0xFFF2C230);
-        graphics.drawString(font, "Center: " + centerChunkX + ", " + centerChunkZ, 12, 218, 0xFFBFC5D2);
-        graphics.drawString(font, "Zoom: " + Math.round(cellSize) + " px", 12, 232, 0xFFBFC5D2);
+        graphics.drawString(font, "Radius / max inhabited min", 12, 32, 0xFFBFC5D2);
+        graphics.drawString(font, "Selected: " + selected.size(), 12, 188, 0xFFFFFFFF);
+        graphics.drawString(font, "Matched: " + scanned.size(), 12, 202, 0xFFBFC5D2);
+        graphics.drawString(font, "Yellow: protected", 12, 216, 0xFFF2C230);
+        graphics.drawString(font, "Center: " + centerChunkX + ", " + centerChunkZ, 12, 238, 0xFFBFC5D2);
+        graphics.drawString(font, "Zoom: " + Math.round(cellSize) + " px", 12, 252, 0xFFBFC5D2);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -374,9 +388,10 @@ public class ChunkEditorScreen extends Screen {
 
     private void sendScan() {
         int radius = parsePositive(radiusBox.getValue(), 128);
+        int minutes = parseNonNegative(minutesBox.getValue(), 5);
         scanned.clear();
         selected.clear();
-        ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ, radius));
+        ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ, radius, minutes));
     }
 
     private void sendCancelScan() {
@@ -389,17 +404,25 @@ public class ChunkEditorScreen extends Screen {
         super.onClose();
     }
 
-    private void sendDelete() {
+    private void sendOperation(ChunkOperation operation) {
         List<ChunkPos> chunks = new ArrayList<>(selected.size());
         for (long key : selected) {
             chunks.add(new ChunkPos((int) key, (int) (key >> 32)));
         }
-        ModNetworking.CHANNEL.sendToServer(new DeleteChunksPacket(chunks));
+        ModNetworking.CHANNEL.sendToServer(new DeleteChunksPacket(operation, chunks));
     }
 
     private int parsePositive(String value, int fallback) {
         try {
             return Math.max(1, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException exception) {
+            return fallback;
+        }
+    }
+
+    private int parseNonNegative(String value, int fallback) {
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
         } catch (NumberFormatException exception) {
             return fallback;
         }

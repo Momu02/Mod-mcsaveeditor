@@ -1,6 +1,6 @@
 # MC Save Editor
 
-Forge 1.20.1 dual-side mod prototype for in-game loaded-chunk visualization, selection, and safe erase.
+Forge 1.20.1 dual-side mod for in-game saved-chunk visualization, filtering, data updates, and safe deletion.
 
 ## Usage
 
@@ -8,10 +8,11 @@ Forge 1.20.1 dual-side mod prototype for in-game loaded-chunk visualization, sel
 2. Install the jar on both client and server.
 3. Run `/mcsaveeditor open` as an operator with permission level 3 or higher.
 4. In the GUI:
-   - Set scan radius and click `Scan`. The scan includes all currently loaded chunks in that range; it does not generate or load additional chunks.
-   - Generated chunks receive an 8x8 terrain preview. Select chunks manually with the mouse before deleting them.
+   - Set scan radius and maximum inhabited minutes, then click `Scan`. Only saved chunks at or below that `InhabitedTime` threshold are returned and selected automatically.
+   - Generated chunks receive an 8x8 terrain preview. Selection can still be adjusted manually.
    - Left drag selects chunks, right drag removes chunks, middle drag pans, wheel zooms.
-   - Click `Confirm Delete` to request server-side erase.
+   - Click `Update` to run Minecraft's current chunk data fixer without removing blocks, block entities, entities, or POI data.
+   - Click `Delete Completely` to remove the chunk from terrain, POI, and entity region storage. The chunk is generated again when it is next visited.
 
 ## Design Notes
 
@@ -22,7 +23,8 @@ Forge 1.20.1 dual-side mod prototype for in-game loaded-chunk visualization, sel
   - forced chunk state is disabled,
   - no player is within the guarded view-distance range,
   - `ServerChunkCache#hasChunk(x, z)` reports that it is not currently loaded.
-- Erase removes the chunk slot from `region`, `poi`, and `entities` storage, resetting the target to an ungenerated state for future terrain generation.
+- Complete deletion removes the chunk slot from `region`, `poi`, and `entities` storage, resetting the target to an ungenerated state for future terrain generation. Anvil region files allocate 32x32 chunks, so deleting individual chunks frees reusable sectors but only deleting every chunk in a region can remove the whole `.mca` file.
+- Updating a chunk means upgrading its stored NBT to the current Minecraft data version. Minecraft cannot regenerate arbitrary terrain at the same coordinates while also guaranteeing that overlapping player-built blocks remain unchanged.
 
 ## Important Files
 

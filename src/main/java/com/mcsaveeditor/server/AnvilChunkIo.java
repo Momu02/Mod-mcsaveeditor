@@ -9,6 +9,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class AnvilChunkIo {
     private static final Method WRITE_METHOD = findWriteMethod();
@@ -108,5 +110,42 @@ public final class AnvilChunkIo {
 
     public static boolean regionFileExists(Path regionPath, ChunkPos pos) {
         return Files.isRegularFile(regionPath.resolve("r." + pos.getRegionX() + "." + pos.getRegionZ() + ".mca"));
+    }
+
+    public static void compactRegion(Path regionPath, int regionX, int regionZ) throws IOException {
+        Path file = regionPath.resolve("r." + regionX + "." + regionZ + ".mca");
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
+
+        List<StoredChunk> chunks = new ArrayList<>();
+        try (RegionFileStorage storage = new RegionFileStorage(regionPath, true)) {
+            int minX = regionX << 5;
+            int minZ = regionZ << 5;
+            for (int localX = 0; localX < 32; localX++) {
+                for (int localZ = 0; localZ < 32; localZ++) {
+                    ChunkPos pos = new ChunkPos(minX + localX, minZ + localZ);
+                    CompoundTag tag = storage.read(pos);
+                    if (tag != null && !tag.isEmpty()) {
+                        chunks.add(new StoredChunk(pos, tag));
+                    }
+                }
+            }
+        }
+
+        Files.deleteIfExists(file);
+        if (chunks.isEmpty()) {
+            return;
+        }
+
+        try (RegionFileStorage storage = new RegionFileStorage(regionPath, false)) {
+            for (StoredChunk chunk : chunks) {
+                writeChunk(storage, chunk.pos(), chunk.tag());
+            }
+            storage.flush();
+        }
+    }
+
+    private record StoredChunk(ChunkPos pos, CompoundTag tag) {
     }
 }
