@@ -8,7 +8,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.dimension.LevelStem;
-import net.minecraft.world.level.levelgen.RandomSequences;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.ServerLevelData;
 
@@ -74,12 +73,11 @@ final class TerrainRegenerationSession implements AutoCloseable {
     }
 
     private ServerLevel createWorld(LevelStorageSource.LevelStorageAccess access, long worldSeed) {
-        RandomSequences randomSequences = new RandomSequences(worldSeed);
         return new ServerLevel(
                 source.getServer(), Util.backgroundExecutor(), access,
                 (ServerLevelData) source.getLevelData(), source.dimension(),
                 new LevelStem(source.dimensionTypeRegistration(), source.getChunkSource().getGenerator()),
-                NO_PROGRESS, source.isDebug(), worldSeed, List.of(), false, randomSequences) {
+                NO_PROGRESS, source.isDebug(), worldSeed, List.of(), false, source.getRandomSequences()) {
             @Override
             public long getSeed() {
                 return worldSeed;
