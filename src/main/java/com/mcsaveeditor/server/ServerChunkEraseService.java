@@ -16,6 +16,7 @@ import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraftforge.event.TickEvent;
