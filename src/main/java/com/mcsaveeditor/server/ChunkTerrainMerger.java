@@ -12,6 +12,7 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 
@@ -148,7 +149,7 @@ final class ChunkTerrainMerger {
         positions.addAll(old.keySet());
         positions.addAll(generatedNew.keySet());
 
-        for (BlockPos pos : new HashSet<>(((LevelChunk) newTerrain).getBlockEntities().keySet())) {
+        for (BlockPos pos : new HashSet<>(getBlockEntityMap(newTerrain).keySet())) {
             newTerrain.removeBlockEntity(pos);
         }
 
@@ -187,9 +188,19 @@ final class ChunkTerrainMerger {
 
     private static Map<BlockPos, CompoundTag> saveBlockEntities(ChunkAccess chunk) {
         Map<BlockPos, CompoundTag> result = new HashMap<>();
-        for (Map.Entry<BlockPos, BlockEntity> entry : ((LevelChunk) chunk).getBlockEntities().entrySet()) {
+        for (Map.Entry<BlockPos, BlockEntity> entry : getBlockEntityMap(chunk).entrySet()) {
             result.put(entry.getKey(), entry.getValue().saveWithFullMetadata());
         }
         return result;
+    }
+
+    private static Map<BlockPos, BlockEntity> getBlockEntityMap(ChunkAccess chunk) {
+        if (chunk instanceof LevelChunk lc) {
+            return lc.getBlockEntities();
+        }
+        if (chunk instanceof ProtoChunk pc) {
+            return pc.getBlockEntities();
+        }
+        return Map.of();
     }
 }
