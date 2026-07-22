@@ -207,7 +207,9 @@ public final class ServerChunkEraseService {
 
             try {
                 if (processStoredChunk(pending)) {
-                    forgetClientChunk(pos);
+                    if (operation != ChunkOperation.REGENERATE) {
+                        forgetClientChunk(pos);
+                    }
                     processed++;
                     return true;
                 } else {
@@ -256,6 +258,9 @@ public final class ServerChunkEraseService {
             }
             chunkMap.flushWorker();
             poiStorage.flush();
+            ChunkPos pos = pending.pos;
+            var future = level.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FULL, true);
+            level.getServer().managedBlock(future::isDone);
             return true;
         }
 
