@@ -8,21 +8,16 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.dimension.LevelStem;
-import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.storage.LevelStorageSource;
-import net.minecraft.world.level.storage.PrimaryLevelData;
 import net.minecraft.world.level.storage.ServerLevelData;
-import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.OptionalLong;
 
 final class TerrainRegenerationSession implements AutoCloseable {
-    private static final Object WORLD_OPTIONS_LOCK = new Object();
     private static final ChunkProgressListener NO_PROGRESS = new ChunkProgressListener() {
         @Override
         public void updateSpawnPos(ChunkPos pos) {
@@ -78,23 +73,11 @@ final class TerrainRegenerationSession implements AutoCloseable {
     }
 
     private ServerLevel createWorld(LevelStorageSource.LevelStorageAccess access, long seed) {
-        synchronized (WORLD_OPTIONS_LOCK) {
-            PrimaryLevelData worldData = (PrimaryLevelData) source.getServer().getWorldData().overworldData();
-            WorldOptions originalOptions = worldData.worldGenOptions();
-            WorldOptions seededOptions = originalOptions.withSeed(OptionalLong.of(seed));
-            try {
-                ObfuscationReflectionHelper.setPrivateValue(
-                        PrimaryLevelData.class, worldData, seededOptions, "worldOptions");
-                return new ServerLevel(
-                        source.getServer(), Util.backgroundExecutor(), access,
-                        (ServerLevelData) source.getLevelData(), source.dimension(),
-                        new LevelStem(source.dimensionTypeRegistration(), source.getChunkSource().getGenerator()),
-                        NO_PROGRESS, source.isDebug(), seed, List.of(), false, source.getRandomSequences());
-            } finally {
-                ObfuscationReflectionHelper.setPrivateValue(
-                        PrimaryLevelData.class, worldData, originalOptions, "worldOptions");
-            }
-        }
+        return new ServerLevel(
+                source.getServer(), Util.backgroundExecutor(), access,
+                (ServerLevelData) source.getLevelData(), source.dimension(),
+                new LevelStem(source.dimensionTypeRegistration(), source.getChunkSource().getGenerator()),
+                NO_PROGRESS, source.isDebug(), seed, List.of(), false, source.getRandomSequences());
     }
 
     private ChunkAccess generate(ServerLevel world, ChunkPos pos) {
