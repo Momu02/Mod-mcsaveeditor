@@ -14,6 +14,7 @@ import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.Util;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
@@ -38,7 +39,7 @@ public final class ServerChunkEraseService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Queue<EraseJob> JOBS = new ArrayDeque<>();
     private static final int CHUNKS_PER_TICK = 24;
-    private static final int REGENERATE_CHUNKS_PER_TICK = 2;
+    private static final int REGENERATE_CHUNKS_PER_TICK = 4;
     private static final int TRANSITION_CHUNKS = 2;
     private static final int MAX_REGENERATE_CHUNKS = 65536;
     private static final int MAX_RETRIES = 1200;
@@ -178,6 +179,7 @@ public final class ServerChunkEraseService {
             long deadline = operation == ChunkOperation.REGENERATE
                     ? System.nanoTime() + REGENERATE_TIME_BUDGET_NS : Long.MAX_VALUE;
             List<ChunkPos> completed = new ArrayList<>(limit);
+            List<ChunkPos> skippedThisTick = new ArrayList<>(limit);
             int remainingLookups = queue.size();
             while (remainingLookups-- > 0 && !queue.isEmpty() && completed.size() < limit && System.nanoTime() < deadline) {
                 PendingChunk pending = queue.poll();
@@ -187,8 +189,9 @@ public final class ServerChunkEraseService {
                 ProcessResult result = process(pending);
                 if (result == ProcessResult.SUCCESS) {
                     completed.add(pending.pos);
+                } else if (result == ProcessResult.SKIPPED) {
+                    skippedThisTick.add(pending.pos);
                 } else if (result == ProcessResult.DEFERRED) {
-                    // Already moved to the tail; stop after one full pass of currently waiting chunks.
                     continue;
                 }
             }
@@ -196,9 +199,12 @@ public final class ServerChunkEraseService {
                 flushRegeneratedChunks();
                 maybeReportProgress();
             }
-            if (!completed.isEmpty()) {
+            List<ChunkPos> allProcessed = new ArrayList<>(completed.size() + skippedThisTick.size());
+            allProcessed.addAll(completed);
+            allProcessed.addAll(skippedThisTick);
+            if (!allProcessed.isEmpty()) {
                 ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
-                        new DeletedChunksPacket(operation, List.copyOf(completed)));
+                        new DeletedChunksPacket(operation, List.copyOf(allProcessed)));
             }
         }
 
@@ -218,7 +224,9 @@ public final class ServerChunkEraseService {
 
             try {
                 if (processStoredChunk(pending)) {
-                    forgetClientChunk(pos);
+                    if (operation != ChunkOperation.REGENERATE) {
+                        forgetClientChunk(pos);
+                    }
                     processed++;
                     return ProcessResult.SUCCESS;
                 }
@@ -395,12 +403,18 @@ public final class ServerChunkEraseService {
             if (!queue.isEmpty()) {
                 return false;
             }
-            if (regenerationSession != null) {
-                regenerationSession.close();
-                regenerationSession = null;
-            }
             flushAndClose(poiStorage);
             flushAndClose(entityStorage);
+            if (regenerationSession != null) {
+                TerrainRegenerationSession session = regenerationSession;
+                regenerationSession = null;
+                Util.backgroundExecutor().execute(() -> {
+                    try {
+                        session.close();
+                    } catch (Exception ignored) {
+                    }
+                });
+            }
             return true;
         }
 

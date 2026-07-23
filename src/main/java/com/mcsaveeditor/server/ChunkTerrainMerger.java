@@ -1,16 +1,29 @@
 package com.mcsaveeditor.server;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.BushBlock;
+import net.minecraft.world.level.block.CactusBlock;
+import net.minecraft.world.level.block.CarpetBlock;
+import net.minecraft.world.level.block.ChorusFlowerBlock;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.DoublePlantBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.SugarCaneBlock;
+import net.minecraft.world.level.block.TorchBlock;
+import net.minecraft.world.level.block.WallTorchBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -52,7 +65,9 @@ final class ChunkTerrainMerger {
                     BlockState currentState = current.getBlockState(pos);
                     BlockState oldState = oldTerrain.getBlockState(pos);
                     if (currentState != oldState) {
-                        newTerrain.setBlockState(pos, currentState, false);
+                        if (canPreserve(currentState, newTerrain, pos)) {
+                            newTerrain.setBlockState(pos, currentState, false);
+                        }
                         newTerrain.removeBlockEntity(pos);
                     } else if (!useNewTerrain) {
                         newTerrain.setBlockState(pos, oldState, false);
@@ -141,6 +156,56 @@ final class ChunkTerrainMerger {
 
     private static double lerp(double first, double second, double amount) {
         return first + (second - first) * amount;
+    }
+
+    private static boolean canPreserve(BlockState state, ChunkAccess terrain, BlockPos pos) {
+        var block = state.getBlock();
+        BlockPos belowPos = pos.below();
+        BlockState below = terrain.getBlockState(belowPos);
+        if (block instanceof DoublePlantBlock doublePlant) {
+            if (state.getValue(DoublePlantBlock.HALF) == DoubleBlockHalf.UPPER) {
+                return below.is(doublePlant) && below.getValue(DoublePlantBlock.HALF) == DoubleBlockHalf.LOWER;
+            }
+            return canHostPlant(below);
+        }
+        if (block instanceof BushBlock) {
+            return canHostPlant(below);
+        }
+        if (block instanceof SnowLayerBlock || block instanceof CarpetBlock) {
+            return isSolidGround(below, terrain, belowPos);
+        }
+        if (block instanceof TorchBlock && !(block instanceof WallTorchBlock)) {
+            return isSolidGround(below, terrain, belowPos)
+                    || below.is(BlockTags.FENCES)
+                    || below.is(BlockTags.WALLS);
+        }
+        if (block instanceof DoorBlock) {
+            return isSolidGround(below, terrain, belowPos);
+        }
+        if (block instanceof SugarCaneBlock) {
+            return below.is(BlockTags.DIRT) || below.is(BlockTags.SAND) || below.is(block);
+        }
+        if (block instanceof CactusBlock) {
+            return below.is(BlockTags.SAND) || below.is(block);
+        }
+        if (block instanceof ChorusFlowerBlock) {
+            return below.is(net.minecraft.world.level.block.Blocks.END_STONE)
+                    || below.is(net.minecraft.world.level.block.Blocks.CHORUS_PLANT);
+        }
+        return true;
+    }
+
+    private static boolean canHostPlant(BlockState below) {
+        return below.is(BlockTags.DIRT)
+                || below.is(net.minecraft.world.level.block.Blocks.FARMLAND)
+                || below.is(BlockTags.NYLIUM)
+                || below.is(net.minecraft.world.level.block.Blocks.SOUL_SAND)
+                || below.is(net.minecraft.world.level.block.Blocks.SOUL_SOIL)
+                || below.is(net.minecraft.world.level.block.Blocks.MOSS_BLOCK);
+    }
+
+    private static boolean isSolidGround(BlockState below, ChunkAccess terrain, BlockPos pos) {
+        return below.isSolidRender(terrain, pos) || below.is(BlockTags.LEAVES);
     }
 
     private static void mergeBlockEntities(@Nullable CompoundTag currentTag, ChunkAccess oldTerrain,
