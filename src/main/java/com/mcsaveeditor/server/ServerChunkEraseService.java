@@ -38,10 +38,11 @@ public final class ServerChunkEraseService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Queue<EraseJob> JOBS = new ArrayDeque<>();
     private static final int CHUNKS_PER_TICK = 24;
-    private static final int REGENERATE_CHUNKS_PER_TICK = 4;
-    private static final int TRANSITION_CHUNKS = 4;
+    private static final int REGENERATE_CHUNKS_PER_TICK = 2;
+    private static final int TRANSITION_CHUNKS = 2;
     private static final int MAX_REGENERATE_CHUNKS = 65536;
     private static final int MAX_RETRIES = 1200;
+    private static final long REGENERATE_TIME_BUDGET_NS = 40_000_000L;
 
     private ServerChunkEraseService() {
     }
@@ -64,10 +65,13 @@ public final class ServerChunkEraseService {
         }
         ServerChunkScanService.cancelScan(player, false);
         long seed = packet.randomSeed() ? new Random().nextLong() : packet.seed();
-        JOBS.add(new EraseJob(level, packet.operation(), distinct, seed));
-        player.sendSystemMessage(Component.literal("MC 存档区块编辑器：已将 " + distinct.size() + " 个区块加入"
-                + operationName(packet.operation()) + "队列。请离开目标区块，等待其卸载。"
-                + (packet.operation() == ChunkOperation.REGENERATE ? " 目标种子：" + seed : "")));
+        EraseJob job = new EraseJob(level, packet.operation(), distinct, seed);
+        JOBS.add(job);
+        String extra = packet.operation() == ChunkOperation.REGENERATE
+                ? " 实际处理 " + job.total + " 个（含过渡带）。目标种子：" + seed
+                : "";
+        player.sendSystemMessage(Component.literal("MC 存档区块编辑器：已将 " + distinct.size() + " 个选中区块加入"
+                + operationName(packet.operation()) + "队列。" + extra + " 请离开目标区块，等待其卸载。"));
     }
 
     private static boolean regenerationAreaExceedsLimit(List<ChunkPos> selected) {
@@ -124,8 +128,10 @@ public final class ServerChunkEraseService {
         private final RegionFileStorage entityStorage;
         private final long targetSeed;
         private TerrainRegenerationSession regenerationSession;
+        private final int total;
         private int processed;
         private int skipped;
+        private int progressMarker;
 
         private EraseJob(ServerLevel level, ChunkOperation operation, List<ChunkPos> chunks, long targetSeed) {
             this.level = level;
@@ -147,6 +153,7 @@ public final class ServerChunkEraseService {
                     }
                 }
             }
+            this.total = queue.size();
             level.getChunkSource().save(true);
         }
 
@@ -168,19 +175,26 @@ public final class ServerChunkEraseService {
 
         private void tick() {
             int limit = operation == ChunkOperation.REGENERATE ? REGENERATE_CHUNKS_PER_TICK : CHUNKS_PER_TICK;
+            long deadline = operation == ChunkOperation.REGENERATE
+                    ? System.nanoTime() + REGENERATE_TIME_BUDGET_NS : Long.MAX_VALUE;
             List<ChunkPos> completed = new ArrayList<>(limit);
-            int remaining = Math.min(limit, queue.size());
-            while (remaining-- > 0 && !queue.isEmpty()) {
+            int remainingLookups = queue.size();
+            while (remainingLookups-- > 0 && !queue.isEmpty() && completed.size() < limit && System.nanoTime() < deadline) {
                 PendingChunk pending = queue.poll();
                 if (pending == null) {
                     continue;
                 }
-                if (process(pending)) {
+                ProcessResult result = process(pending);
+                if (result == ProcessResult.SUCCESS) {
                     completed.add(pending.pos);
+                } else if (result == ProcessResult.DEFERRED) {
+                    // Already moved to the tail; stop after one full pass of currently waiting chunks.
+                    continue;
                 }
             }
             if (operation == ChunkOperation.REGENERATE && !completed.isEmpty()) {
                 flushRegeneratedChunks();
+                maybeReportProgress();
             }
             if (!completed.isEmpty()) {
                 ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
@@ -188,50 +202,52 @@ public final class ServerChunkEraseService {
             }
         }
 
-        private boolean process(PendingChunk pending) {
+        private ProcessResult process(PendingChunk pending) {
             ChunkPos pos = pending.pos;
             ServerChunkCache chunkSource = level.getChunkSource();
 
             level.setChunkForced(pos.x, pos.z, false);
 
             if (isNearAnyPlayer(pos)) {
-                deferOrSkip(pending);
-                return false;
+                return deferOrSkip(pending);
             }
 
             if (chunkSource.hasChunk(pos.x, pos.z)) {
-                if (pending.retries++ < MAX_RETRIES) {
-                    queue.add(pending);
-                } else {
-                    skipped++;
-                }
-                return false;
+                return deferOrSkip(pending);
             }
 
             try {
                 if (processStoredChunk(pending)) {
-                    if (operation != ChunkOperation.REGENERATE) {
-                        forgetClientChunk(pos);
-                    }
+                    forgetClientChunk(pos);
                     processed++;
-                    return true;
-                } else {
-                    skipped++;
-                    return true;
+                    return ProcessResult.SUCCESS;
                 }
+                skipped++;
+                return ProcessResult.SKIPPED;
             } catch (Exception exception) {
                 skipped++;
                 LOGGER.error("MC 存档区块编辑器处理区块 {} 失败", pos, exception);
+                return ProcessResult.SKIPPED;
             }
-            return false;
         }
 
-        private void deferOrSkip(PendingChunk pending) {
+        private void maybeReportProgress() {
+            int done = processed + skipped;
+            if (done < progressMarker + 8 && done < total) {
+                return;
+            }
+            progressMarker = done;
+            LOGGER.info("MC 存档区块编辑器：地形重建进度 {}/{}（完成 {}，跳过 {}，队列剩余 {}）",
+                    done, total, processed, skipped, queue.size());
+        }
+
+        private ProcessResult deferOrSkip(PendingChunk pending) {
             if (pending.retries++ < MAX_RETRIES) {
                 queue.add(pending);
-            } else {
-                skipped++;
+                return ProcessResult.DEFERRED;
             }
+            skipped++;
+            return ProcessResult.SKIPPED;
         }
 
         private boolean processStoredChunk(PendingChunk pending) throws Exception {
@@ -247,35 +263,20 @@ public final class ServerChunkEraseService {
             if (regenerationSession == null) {
                 regenerationSession = new TerrainRegenerationSession(level, targetSeed);
             }
-            TerrainRegenerationSession session = regenerationSession;
-            session.request(pending.pos);
-            TerrainRegenerationSession.TerrainPair terrain = session.completed(pending.pos);
-            if (terrain == null) {
-                if (pending.retries++ < MAX_RETRIES) {
-                    queue.add(pending);
-                } else {
-                    skipped++;
-                    LOGGER.warn("MC 存档区块编辑器等待地形预取超时，跳过 {}", pending.pos);
-                }
+            boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
+            CompoundTag current = regionExists
+                    ? chunkMap.read(pending.pos).join().orElse(null) : null;
+            if (current == null && pending.transitionDistance > 0) {
                 return false;
             }
-            try {
-                boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
-                CompoundTag current = regionExists
-                        ? chunkMap.read(pending.pos).join().orElse(null) : null;
-                if (current == null && pending.transitionDistance > 0) {
-                    return false;
-                }
-                CompoundTag merged = ChunkTerrainMerger.merge(
-                        level, session, terrain, pending.pos, current, pending.transitionDistance, targetSeed);
-                chunkMap.write(pending.pos, merged);
-                if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
-                    AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
-                }
-                return true;
-            } finally {
-                session.release(pending.pos);
+            TerrainRegenerationSession.TerrainPair terrain = regenerationSession.pair(pending.pos);
+            CompoundTag merged = ChunkTerrainMerger.merge(
+                    level, regenerationSession, terrain, pending.pos, current, pending.transitionDistance, targetSeed);
+            chunkMap.write(pending.pos, merged);
+            if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
+                AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
             }
+            return true;
         }
 
         private void flushRegeneratedChunks() {
@@ -391,18 +392,16 @@ public final class ServerChunkEraseService {
         }
 
         private boolean isDone() {
-            if (queue.isEmpty()) {
-                if (regenerationSession != null && !regenerationSession.isIdle()) {
-                    return false;
-                }
-                if (regenerationSession != null) {
-                    regenerationSession.close();
-                }
-                flushAndClose(poiStorage);
-                flushAndClose(entityStorage);
-                return true;
+            if (!queue.isEmpty()) {
+                return false;
             }
-            return false;
+            if (regenerationSession != null) {
+                regenerationSession.close();
+                regenerationSession = null;
+            }
+            flushAndClose(poiStorage);
+            flushAndClose(entityStorage);
+            return true;
         }
 
         private static RegionFileStorage openStorage(Path path) {
@@ -434,5 +433,11 @@ public final class ServerChunkEraseService {
             this.pos = pos;
             this.transitionDistance = transitionDistance;
         }
+    }
+
+    private enum ProcessResult {
+        SUCCESS,
+        SKIPPED,
+        DEFERRED
     }
 }

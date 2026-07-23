@@ -14,17 +14,11 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 final class TerrainRegenerationSession implements AutoCloseable {
-    private static final int MAX_PENDING_REQUESTS = 32;
-    private static final int MAX_COMPLETED_RESULTS = 256;
     private static final ChunkProgressListener NO_PROGRESS = new ChunkProgressListener() {
         @Override
         public void updateSpawnPos(ChunkPos pos) {
@@ -43,69 +37,29 @@ final class TerrainRegenerationSession implements AutoCloseable {
         }
     };
 
-    private final ServerLevel source;
     private final Path root;
-    private final LevelStorageSource oldStorage;
-    private final LevelStorageSource newStorage;
     private final LevelStorageSource.LevelStorageAccess oldAccess;
     private final LevelStorageSource.LevelStorageAccess newAccess;
     private final ServerLevel oldWorld;
     private final ServerLevel newWorld;
-    private final Executor workerExecutor;
-    private final Map<Long, PendingPair> pending = new LinkedHashMap<>();
-    private final Map<Long, TerrainPair> completed = new LinkedHashMap<>();
-    private boolean closed;
+    private final Map<Long, ChunkAccess> oldCache = new HashMap<>();
+    private final Map<Long, ChunkAccess> newCache = new HashMap<>();
 
     TerrainRegenerationSession(ServerLevel source, long targetSeed) throws IOException {
-        this.source = source;
         this.root = Files.createTempDirectory("mcsaveeditor-worldgen-");
-        this.oldStorage = LevelStorageSource.createDefault(root.resolve("old"));
-        this.newStorage = LevelStorageSource.createDefault(root.resolve("new"));
+        LevelStorageSource oldStorage = LevelStorageSource.createDefault(root.resolve("old"));
+        LevelStorageSource newStorage = LevelStorageSource.createDefault(root.resolve("new"));
         this.oldAccess = oldStorage.createAccess("world");
         this.newAccess = newStorage.createAccess("world");
-        this.oldWorld = createWorld(oldAccess, source.getSeed());
-        this.newWorld = createWorld(newAccess, targetSeed);
-        this.workerExecutor = runnable -> source.getServer().executeIfPossible(runnable);
+        this.oldWorld = createWorld(source, oldAccess, source.getSeed());
+        this.newWorld = createWorld(source, newAccess, targetSeed);
     }
 
-    boolean canAcceptMore() {
-        collectCompleted();
-        return pending.size() < MAX_PENDING_REQUESTS && completed.size() < MAX_COMPLETED_RESULTS;
-    }
-
-    void request(ChunkPos pos) {
-        if (closed) {
-            throw new IllegalStateException("地形重建会话已关闭");
-        }
+    TerrainPair pair(ChunkPos pos) {
         long key = pos.toLong();
-        if (completed.containsKey(key) || pending.containsKey(key)) {
-            return;
-        }
-        PendingPair pair = new PendingPair(
-                CompletableFuture.supplyAsync(() -> generate(oldWorld, pos), workerExecutor),
-                CompletableFuture.supplyAsync(() -> generate(newWorld, pos), workerExecutor));
-        pending.put(key, pair);
-        pair.combined().whenComplete((result, error) -> source.getServer().executeIfPossible(() -> {
-            PendingPair current = pending.remove(key);
-            if (current != null && error == null && result != null) {
-                completed.put(key, result);
-            }
-        }));
-    }
-
-    @Nullable
-    TerrainPair completed(ChunkPos pos) {
-        collectCompleted();
-        return completed.get(pos.toLong());
-    }
-
-    void release(ChunkPos pos) {
-        completed.remove(pos.toLong());
-        pending.remove(pos.toLong());
-    }
-
-    boolean isIdle() {
-        return pending.isEmpty() && completed.isEmpty();
+        ChunkAccess oldTerrain = oldCache.computeIfAbsent(key, ignored -> generate(oldWorld, pos));
+        ChunkAccess newTerrain = newCache.computeIfAbsent(key, ignored -> generate(newWorld, pos));
+        return new TerrainPair(oldTerrain, newTerrain);
     }
 
     ServerLevel oldWorld() {
@@ -116,8 +70,9 @@ final class TerrainRegenerationSession implements AutoCloseable {
         return newWorld;
     }
 
-    private ServerLevel createWorld(LevelStorageSource.LevelStorageAccess access, long worldSeed) {
-        return new ServerLevel(
+    private static ServerLevel createWorld(ServerLevel source, LevelStorageSource.LevelStorageAccess access,
+                                           long worldSeed) {
+        ServerLevel world = new ServerLevel(
                 source.getServer(), Util.backgroundExecutor(), access,
                 (ServerLevelData) source.getLevelData(), source.dimension(),
                 new LevelStem(source.dimensionTypeRegistration(), source.getChunkSource().getGenerator()),
@@ -127,49 +82,32 @@ final class TerrainRegenerationSession implements AutoCloseable {
                 return worldSeed;
             }
         };
+        world.noSave = true;
+        return world;
     }
 
-    private void collectCompleted() {
-        Set<Long> finished = new HashSet<>();
-        for (Map.Entry<Long, PendingPair> entry : pending.entrySet()) {
-            CompletableFuture<TerrainPair> combined = entry.getValue().combined();
-            TerrainPair pair = combined.getNow(null);
-            if (pair != null) {
-                completed.putIfAbsent(entry.getKey(), pair);
-                finished.add(entry.getKey());
-            }
-        }
-        finished.forEach(pending::remove);
-    }
-
-    private ChunkAccess generate(ServerLevel world, ChunkPos pos) {
-        var future =
-                world.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FEATURES, true);
+    private static ChunkAccess generate(ServerLevel world, ChunkPos pos) {
+        var future = world.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FEATURES, true);
+        world.getServer().managedBlock(future::isDone);
         return future.join().left().orElseThrow(() -> new IllegalStateException("无法生成区块 " + pos));
     }
 
     @Override
     public void close() {
-        closed = true;
-        pending.clear();
-        completed.clear();
-        try {
-            oldWorld.close();
-        } catch (IOException ignored) {
-        }
-        try {
-            newWorld.close();
-        } catch (IOException ignored) {
-        }
-        try {
-            oldAccess.close();
-        } catch (IOException ignored) {
-        }
-        try {
-            newAccess.close();
-        } catch (IOException ignored) {
-        }
+        oldCache.clear();
+        newCache.clear();
+        closeQuietly(oldWorld);
+        closeQuietly(newWorld);
+        closeQuietly(oldAccess);
+        closeQuietly(newAccess);
         deleteTree(root);
+    }
+
+    private static void closeQuietly(AutoCloseable closeable) {
+        try {
+            closeable.close();
+        } catch (Exception ignored) {
+        }
     }
 
     private static void deleteTree(Path root) {
@@ -188,12 +126,5 @@ final class TerrainRegenerationSession implements AutoCloseable {
     }
 
     record TerrainPair(ChunkAccess oldTerrain, ChunkAccess newTerrain) {
-    }
-
-    private record PendingPair(CompletableFuture<ChunkAccess> oldTerrain,
-                               CompletableFuture<ChunkAccess> newTerrain) {
-        private CompletableFuture<TerrainPair> combined() {
-            return oldTerrain.thenCombine(newTerrain, TerrainPair::new);
-        }
     }
 }
