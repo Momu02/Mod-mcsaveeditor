@@ -240,13 +240,17 @@ public final class ServerChunkEraseService {
             boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
             CompoundTag current = regionExists
                     ? chunkMap.read(pending.pos).join().orElse(null) : null;
-            TerrainRegenerationSession.TerrainPair terrain = regenerationSession.pair(pending.pos);
+            var generated = regenerationSession.generate(pending.pos);
             CompoundTag merged;
             if (current == null) {
-                merged = ChunkSerializer.write(regenerationSession.newWorld(), terrain.newTerrain());
+                if (generated instanceof net.minecraft.world.level.chunk.ProtoChunk proto) {
+                    proto.setStatus(net.minecraft.world.level.chunk.ChunkStatus.LIGHT);
+                }
+                merged = ChunkSerializer.write(regenerationSession.genWorld(), generated);
+                merged.putString("Status", net.minecraft.world.level.chunk.ChunkStatus.LIGHT.toString());
             } else {
                 merged = ChunkTerrainMerger.merge(
-                        level, regenerationSession, terrain, pending.pos, current, selectedChunks, targetSeed);
+                        level, regenerationSession, generated, pending.pos, current, selectedChunks, targetSeed);
             }
             chunkMap.write(pending.pos, merged);
             if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {

@@ -39,47 +39,34 @@ final class TerrainRegenerationSession implements AutoCloseable {
 
     private final ServerLevel source;
     private final Path root;
-    private final LevelStorageSource.LevelStorageAccess oldAccess;
-    private final LevelStorageSource.LevelStorageAccess newAccess;
-    private final ServerLevel oldWorld;
-    private final ServerLevel newWorld;
-    private final Map<Long, TerrainPair> cache = new HashMap<>();
+    private final LevelStorageSource.LevelStorageAccess access;
+    private final ServerLevel genWorld;
+    private final Map<Long, ChunkAccess> cache = new HashMap<>();
 
     TerrainRegenerationSession(ServerLevel source, long targetSeed) throws IOException {
         this.source = source;
         this.root = Files.createTempDirectory("mcsaveeditor-worldgen-");
-        LevelStorageSource oldStorage = LevelStorageSource.createDefault(root.resolve("old"));
-        LevelStorageSource newStorage = LevelStorageSource.createDefault(root.resolve("new"));
-        this.oldAccess = oldStorage.createAccess("world");
-        this.newAccess = newStorage.createAccess("world");
-        this.oldWorld = createWorld(source, oldAccess, source.getSeed());
-        this.newWorld = createWorld(source, newAccess, targetSeed);
+        LevelStorageSource storage = LevelStorageSource.createDefault(root.resolve("gen"));
+        this.access = storage.createAccess("world");
+        this.genWorld = createWorld(source, access, targetSeed);
     }
 
-    TerrainPair pair(ChunkPos pos) {
+    ChunkAccess generate(ChunkPos pos) {
         long key = pos.toLong();
-        TerrainPair cached = cache.get(key);
+        ChunkAccess cached = cache.get(key);
         if (cached != null) {
             return cached;
         }
-        var futureOld = oldWorld.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FEATURES, true);
-        var futureNew = newWorld.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FEATURES, true);
-        source.getServer().managedBlock(() -> futureOld.isDone() && futureNew.isDone());
-        ChunkAccess oldTerrain = futureOld.join().left()
-                .orElseThrow(() -> new IllegalStateException("无法生成旧区块 " + pos));
-        ChunkAccess newTerrain = futureNew.join().left()
-                .orElseThrow(() -> new IllegalStateException("无法生成新区块 " + pos));
-        TerrainPair pair = new TerrainPair(oldTerrain, newTerrain);
-        cache.put(key, pair);
-        return pair;
+        var future = genWorld.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FEATURES, true);
+        source.getServer().managedBlock(future::isDone);
+        ChunkAccess chunk = future.join().left()
+                .orElseThrow(() -> new IllegalStateException("无法生成区块 " + pos));
+        cache.put(key, chunk);
+        return chunk;
     }
 
-    ServerLevel oldWorld() {
-        return oldWorld;
-    }
-
-    ServerLevel newWorld() {
-        return newWorld;
+    ServerLevel genWorld() {
+        return genWorld;
     }
 
     private static ServerLevel createWorld(ServerLevel source, LevelStorageSource.LevelStorageAccess access,
@@ -101,10 +88,8 @@ final class TerrainRegenerationSession implements AutoCloseable {
     @Override
     public void close() {
         cache.clear();
-        closeQuietly(oldWorld);
-        closeQuietly(newWorld);
-        closeQuietly(oldAccess);
-        closeQuietly(newAccess);
+        closeQuietly(genWorld);
+        closeQuietly(access);
         deleteTree(root);
     }
 
@@ -128,8 +113,5 @@ final class TerrainRegenerationSession implements AutoCloseable {
             });
         } catch (IOException ignored) {
         }
-    }
-
-    record TerrainPair(ChunkAccess oldTerrain, ChunkAccess newTerrain) {
     }
 }
