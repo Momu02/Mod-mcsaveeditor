@@ -17,8 +17,11 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.Util;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
@@ -28,6 +31,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Queue;
@@ -190,9 +194,7 @@ public final class ServerChunkEraseService {
 
             try {
                 if (processStoredChunk(pending)) {
-                    if (operation != ChunkOperation.REGENERATE) {
-                        forgetClientChunk(pos);
-                    }
+                    forgetClientChunk(pos);
                     processed++;
                     return ProcessResult.SUCCESS;
                 }
@@ -241,6 +243,10 @@ public final class ServerChunkEraseService {
             CompoundTag current = regionExists
                     ? chunkMap.read(pending.pos).join().orElse(null) : null;
             var generated = regenerationSession.generate(pending.pos);
+            if (generated instanceof ProtoChunk proto) {
+                proto.setStatus(ChunkStatus.FULL);
+                Heightmap.primeHeightmaps(proto, EnumSet.allOf(Heightmap.Types.class));
+            }
             CompoundTag merged;
             if (current == null) {
                 merged = ChunkSerializer.write(regenerationSession.genWorld(), generated);
