@@ -17,6 +17,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.Util;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraftforge.event.TickEvent;
@@ -27,10 +28,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Queue;
 import java.util.Random;
 import java.util.Set;
@@ -40,7 +39,6 @@ public final class ServerChunkEraseService {
     private static final Queue<EraseJob> JOBS = new ArrayDeque<>();
     private static final int CHUNKS_PER_TICK = 24;
     private static final int REGENERATE_CHUNKS_PER_TICK = 4;
-    private static final int TRANSITION_CHUNKS = 5;
     private static final int MAX_REGENERATE_CHUNKS = 65536;
     private static final int MAX_RETRIES = 1200;
     private static final long REGENERATE_TIME_BUDGET_NS = 40_000_000L;
@@ -59,8 +57,8 @@ public final class ServerChunkEraseService {
 
         ServerLevel level = player.serverLevel();
         List<ChunkPos> distinct = packet.chunks().stream().distinct().limit(DeleteChunksPacket.MAX_DELETE_COUNT).toList();
-        if (packet.operation() == ChunkOperation.REGENERATE && regenerationAreaExceedsLimit(distinct)) {
-            player.sendSystemMessage(Component.literal("MC 存档区块编辑器：选区过于分散，包含过渡区域后超过 "
+        if (packet.operation() == ChunkOperation.REGENERATE && distinct.size() > MAX_REGENERATE_CHUNKS) {
+            player.sendSystemMessage(Component.literal("MC 存档区块编辑器：选区超过 "
                     + MAX_REGENERATE_CHUNKS + " 个区块。请分批处理。").withStyle(ChatFormatting.RED));
             return;
         }
@@ -69,25 +67,10 @@ public final class ServerChunkEraseService {
         EraseJob job = new EraseJob(level, packet.operation(), distinct, seed);
         JOBS.add(job);
         String extra = packet.operation() == ChunkOperation.REGENERATE
-                ? " 实际处理 " + job.total + " 个（含过渡带）。目标种子：" + seed
+                ? " 处理 " + job.total + " 个选中区块（边缘在圈选内高度融合）。目标种子：" + seed
                 : "";
         player.sendSystemMessage(Component.literal("MC 存档区块编辑器：已将 " + distinct.size() + " 个选中区块加入"
                 + operationName(packet.operation()) + "队列。" + extra + " 请离开目标区块，等待其卸载。"));
-    }
-
-    private static boolean regenerationAreaExceedsLimit(List<ChunkPos> selected) {
-        Set<Long> expanded = new HashSet<>();
-        for (ChunkPos center : selected) {
-            for (int dx = -TRANSITION_CHUNKS; dx <= TRANSITION_CHUNKS; dx++) {
-                for (int dz = -TRANSITION_CHUNKS; dz <= TRANSITION_CHUNKS; dz++) {
-                    expanded.add(ChunkPos.asLong(center.x + dx, center.z + dz));
-                    if (expanded.size() > MAX_REGENERATE_CHUNKS) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
     }
 
     public static void onServerTick(TickEvent.ServerTickEvent event) {
@@ -128,6 +111,7 @@ public final class ServerChunkEraseService {
         private final RegionFileStorage poiStorage;
         private final RegionFileStorage entityStorage;
         private final long targetSeed;
+        private final Set<Long> selectedChunks;
         private TerrainRegenerationSession regenerationSession;
         private final int total;
         private int processed;
@@ -143,35 +127,17 @@ public final class ServerChunkEraseService {
             this.poiStorage = openStorage(poiRegionPath);
             this.entityStorage = openStorage(entityRegionPath);
             this.targetSeed = targetSeed;
+            this.selectedChunks = new HashSet<>();
 
-            if (operation == ChunkOperation.REGENERATE) {
-                addRegenerationArea(chunks);
-            } else {
-                Set<Long> seen = new HashSet<>();
-                for (ChunkPos pos : chunks) {
-                    if (seen.add(pos.toLong())) {
-                        queue.add(new PendingChunk(pos, 0));
-                    }
+            Set<Long> seen = new HashSet<>();
+            for (ChunkPos pos : chunks) {
+                if (seen.add(pos.toLong())) {
+                    selectedChunks.add(pos.toLong());
+                    queue.add(new PendingChunk(pos));
                 }
             }
             this.total = queue.size();
             level.getChunkSource().save(true);
-        }
-
-        private void addRegenerationArea(List<ChunkPos> selected) {
-            Map<Long, Integer> distances = new HashMap<>();
-            for (ChunkPos center : selected) {
-                for (int dx = -TRANSITION_CHUNKS; dx <= TRANSITION_CHUNKS; dx++) {
-                    for (int dz = -TRANSITION_CHUNKS; dz <= TRANSITION_CHUNKS; dz++) {
-                        int distance = Math.max(Math.abs(dx), Math.abs(dz));
-                        ChunkPos pos = new ChunkPos(center.x + dx, center.z + dz);
-                        distances.merge(pos.toLong(), distance, Math::min);
-                    }
-                }
-            }
-            distances.entrySet().stream()
-                    .sorted(Map.Entry.<Long, Integer>comparingByValue().thenComparingLong(Map.Entry::getKey))
-                    .forEach(entry -> queue.add(new PendingChunk(new ChunkPos(entry.getKey()), entry.getValue())));
         }
 
         private void tick() {
@@ -274,13 +240,14 @@ public final class ServerChunkEraseService {
             boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
             CompoundTag current = regionExists
                     ? chunkMap.read(pending.pos).join().orElse(null) : null;
-            if (current == null && pending.transitionDistance > 0) {
-                return false;
-            }
             TerrainRegenerationSession.TerrainPair terrain = regenerationSession.pair(pending.pos);
-            CompoundTag merged = ChunkTerrainMerger.merge(
-                    level, regenerationSession, terrain, pending.pos, current,
-                    pending.transitionDistance, TRANSITION_CHUNKS, targetSeed);
+            CompoundTag merged;
+            if (current == null) {
+                merged = ChunkSerializer.write(regenerationSession.newWorld(), terrain.newTerrain());
+            } else {
+                merged = ChunkTerrainMerger.merge(
+                        level, regenerationSession, terrain, pending.pos, current, selectedChunks, targetSeed);
+            }
             chunkMap.write(pending.pos, merged);
             if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
                 AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
@@ -441,12 +408,10 @@ public final class ServerChunkEraseService {
 
     private static final class PendingChunk {
         private final ChunkPos pos;
-        private final int transitionDistance;
         private int retries;
 
-        private PendingChunk(ChunkPos pos, int transitionDistance) {
+        private PendingChunk(ChunkPos pos) {
             this.pos = pos;
-            this.transitionDistance = transitionDistance;
         }
     }
 
