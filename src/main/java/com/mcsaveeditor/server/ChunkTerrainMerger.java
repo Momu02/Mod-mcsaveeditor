@@ -2,11 +2,14 @@ package com.mcsaveeditor.server;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -168,11 +171,24 @@ final class ChunkTerrainMerger {
             if (desired == null) {
                 continue;
             }
-            BlockEntity blockEntity = BlockEntity.loadStatic(pos, newTerrain.getBlockState(pos), desired);
+            BlockState blockState = newTerrain.getBlockState(pos);
+            if (!canLoadBlockEntity(desired, blockState)) {
+                continue;
+            }
+            BlockEntity blockEntity = BlockEntity.loadStatic(pos, blockState, desired);
             if (blockEntity != null) {
                 newTerrain.setBlockEntity(blockEntity);
             }
         }
+    }
+
+    private static boolean canLoadBlockEntity(CompoundTag tag, BlockState blockState) {
+        ResourceLocation id = ResourceLocation.tryParse(tag.getString("id"));
+        if (id == null) {
+            return false;
+        }
+        BlockEntityType<?> type = BuiltInRegistries.BLOCK_ENTITY_TYPE.getOptional(id).orElse(null);
+        return type != null && type.isValid(blockState);
     }
 
     private static Map<BlockPos, CompoundTag> readBlockEntities(CompoundTag chunkTag) {
