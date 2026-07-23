@@ -243,11 +243,7 @@ public final class ServerChunkEraseService {
             var generated = regenerationSession.generate(pending.pos);
             CompoundTag merged;
             if (current == null) {
-                if (generated instanceof net.minecraft.world.level.chunk.ProtoChunk proto) {
-                    proto.setStatus(net.minecraft.world.level.chunk.ChunkStatus.LIGHT);
-                }
                 merged = ChunkSerializer.write(regenerationSession.genWorld(), generated);
-                merged.putString("Status", net.minecraft.world.level.chunk.ChunkStatus.LIGHT.toString());
             } else {
                 merged = ChunkTerrainMerger.merge(
                         level, regenerationSession, generated, pending.pos, current, selectedChunks, targetSeed);

@@ -46,18 +46,16 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.PalettedContainer;
-import net.minecraft.world.level.chunk.UpgradeData;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 
-import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -73,11 +71,6 @@ final class ChunkTerrainMerger {
                              CompoundTag currentTag, Set<Long> selectedChunks, long targetSeed) {
         ChunkAccess current = ChunkSerializer.read(
                 sourceWorld, sourceWorld.getPoiManager(), chunkPos, currentTag);
-        ProtoChunk result = new ProtoChunk(
-                chunkPos, UpgradeData.EMPTY, sourceWorld,
-                sourceWorld.registryAccess().registryOrThrow(Registries.BIOME),
-                null);
-        result.setStatus(ChunkStatus.LIGHT);
 
         int minY = sourceWorld.getMinBuildHeight();
         int maxY = sourceWorld.getMaxBuildHeight();
@@ -97,29 +90,41 @@ final class ChunkTerrainMerger {
                     pos.set(blockX, y, blockZ);
                     BlockState currentState = current.getBlockState(pos);
                     BlockState newState = generatedNew.getBlockState(pos);
-                    BlockState chosen;
-                    if (isArtificialBuildBlock(currentState) && canPreserve(currentState, result, pos)) {
-                        chosen = currentState;
-                    } else if (blend >= 0.999D) {
-                        chosen = newState;
-                    } else if (blend <= 0.001D) {
-                        chosen = currentState;
-                    } else {
-                        chosen = blendBlockState(
-                                current, generatedNew, samplePos, blockX, y, blockZ,
-                                oldH, newH, targetH, blend, targetSeed, minY, maxY);
+
+                    if (isArtificialBuildBlock(currentState) && canPreserve(currentState, generatedNew, pos)) {
+                        if (currentState != newState) {
+                            generatedNew.setBlockState(pos, currentState, false);
+                            generatedNew.removeBlockEntity(pos);
+                        }
+                        continue;
                     }
-                    result.setBlockState(pos, chosen, false);
+
+                    if (blend >= 0.999D) {
+                        continue;
+                    }
+                    if (blend <= 0.001D) {
+                        if (currentState != newState) {
+                            generatedNew.setBlockState(pos, currentState, false);
+                            generatedNew.removeBlockEntity(pos);
+                        }
+                        continue;
+                    }
+
+                    BlockState blended = blendBlockState(
+                            current, generatedNew, samplePos, blockX, y, blockZ,
+                            oldH, newH, targetH, blend, targetSeed, minY, maxY);
+                    if (blended != newState) {
+                        generatedNew.setBlockState(pos, blended, false);
+                        generatedNew.removeBlockEntity(pos);
+                    }
                 }
             }
         }
 
-        mergeBiomes(current, generatedNew, result, chunkPos, selectedChunks, targetSeed);
-        copyHeightmaps(result);
-        mergeBlockEntities(currentTag, current, generatedNew, result, selectedChunks, targetSeed);
+        mergeBiomes(current, generatedNew, chunkPos, selectedChunks, targetSeed);
+        mergeBlockEntities(currentTag, current, generatedNew, selectedChunks, targetSeed);
 
-        CompoundTag tag = ChunkSerializer.write(session.genWorld(), result);
-        tag.putString("Status", ChunkStatus.LIGHT.toString());
+        CompoundTag tag = ChunkSerializer.write(session.genWorld(), generatedNew);
         if (currentTag != null) {
             copyIfPresent(currentTag, tag, "InhabitedTime");
             copyIfPresent(currentTag, tag, "LastUpdate");
@@ -128,11 +133,6 @@ final class ChunkTerrainMerger {
             copyIfPresent(currentTag, tag, "ForgeCaps");
         }
         return tag;
-    }
-
-    private static void copyHeightmaps(ProtoChunk chunk) {
-        EnumSet<Heightmap.Types> types = EnumSet.allOf(Heightmap.Types.class);
-        Heightmap.primeHeightmaps(chunk, types);
     }
 
     private static boolean isArtificialBuildBlock(BlockState state) {
@@ -430,18 +430,15 @@ final class ChunkTerrainMerger {
     }
 
     @SuppressWarnings("unchecked")
-    private static void mergeBiomes(ChunkAccess current, ChunkAccess generatedNew, ProtoChunk result,
+    private static void mergeBiomes(ChunkAccess current, ChunkAccess generatedNew,
                                     ChunkPos chunkPos, Set<Long> selectedChunks, long seed) {
         LevelChunkSection[] oldSections = current.getSections();
         LevelChunkSection[] newSections = generatedNew.getSections();
-        LevelChunkSection[] outSections = result.getSections();
-        for (int sectionIndex = 0; sectionIndex < Math.min(newSections.length, outSections.length); sectionIndex++) {
-            if (outSections[sectionIndex] == null) {
+        for (int sectionIndex = 0; sectionIndex < Math.min(newSections.length, newSections.length); sectionIndex++) {
+            if (newSections[sectionIndex] == null) {
                 continue;
             }
             PalettedContainer<Holder<Biome>> target =
-                    (PalettedContainer<Holder<Biome>>) outSections[sectionIndex].getBiomes();
-            PalettedContainer<Holder<Biome>> fromNew =
                     (PalettedContainer<Holder<Biome>>) newSections[sectionIndex].getBiomes();
             for (int quartX = 0; quartX < 4; quartX++) {
                 for (int quartZ = 0; quartZ < 4; quartZ++) {
@@ -452,7 +449,7 @@ final class ChunkTerrainMerger {
                     for (int quartY = 0; quartY < 4; quartY++) {
                         Holder<Biome> biome = useOld
                                 ? oldSections[sectionIndex].getNoiseBiome(quartX, quartY, quartZ)
-                                : fromNew.get(quartX, quartY, quartZ);
+                                : target.get(quartX, quartY, quartZ);
                         target.getAndSetUnchecked(quartX, quartY, quartZ, biome);
                     }
                 }
@@ -534,34 +531,38 @@ final class ChunkTerrainMerger {
     }
 
     private static void mergeBlockEntities(CompoundTag currentTag, ChunkAccess current, ChunkAccess generatedNew,
-                                           ProtoChunk result, Set<Long> selectedChunks, long seed) {
+                                           Set<Long> selectedChunks, long seed) {
         Map<BlockPos, CompoundTag> currentBes = readBlockEntities(currentTag);
-        Map<BlockPos, CompoundTag> generatedBes = saveBlockEntities(generatedNew);
+
+        for (BlockPos placePos : new HashSet<>(getBlockEntityMap(generatedNew).keySet())) {
+            generatedNew.removeBlockEntity(placePos);
+        }
 
         for (Map.Entry<BlockPos, CompoundTag> entry : currentBes.entrySet()) {
             BlockPos pos = entry.getKey();
-            BlockState state = result.getBlockState(pos);
+            BlockState state = generatedNew.getBlockState(pos);
             if (isArtificialBuildBlock(state) && canLoadBlockEntity(entry.getValue(), state)) {
                 BlockEntity blockEntity = BlockEntity.loadStatic(pos, state, entry.getValue());
                 if (blockEntity != null) {
-                    result.setBlockEntity(blockEntity);
+                    generatedNew.setBlockEntity(blockEntity);
                 }
             }
         }
 
+        Map<BlockPos, CompoundTag> generatedBes = saveBlockEntities(generatedNew);
         for (Map.Entry<BlockPos, CompoundTag> entry : generatedBes.entrySet()) {
             BlockPos pos = entry.getKey();
-            if (result.getBlockEntities().containsKey(pos)) {
+            if (getBlockEntityMap(generatedNew).containsKey(pos)) {
                 continue;
             }
             if (edgeBlendFactor(pos.getX(), pos.getZ(), selectedChunks, seed) < 0.5D) {
                 continue;
             }
-            BlockState state = result.getBlockState(pos);
+            BlockState state = generatedNew.getBlockState(pos);
             if (canLoadBlockEntity(entry.getValue(), state)) {
                 BlockEntity blockEntity = BlockEntity.loadStatic(pos, state, entry.getValue());
                 if (blockEntity != null) {
-                    result.setBlockEntity(blockEntity);
+                    generatedNew.setBlockEntity(blockEntity);
                 }
             }
         }
