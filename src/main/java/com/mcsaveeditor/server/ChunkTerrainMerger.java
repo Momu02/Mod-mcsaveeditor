@@ -29,10 +29,11 @@ final class ChunkTerrainMerger {
     private ChunkTerrainMerger() {
     }
 
-    static CompoundTag merge(ServerLevel sourceWorld, TerrainRegenerationSession session, ChunkPos chunkPos,
+    static CompoundTag merge(ServerLevel sourceWorld, TerrainRegenerationSession session,
+                             TerrainRegenerationSession.TerrainPair terrain, ChunkPos chunkPos,
                              @Nullable CompoundTag currentTag, int transitionDistance, long targetSeed) {
-        ChunkAccess oldTerrain = session.oldChunk(chunkPos);
-        ChunkAccess newTerrain = session.newChunk(chunkPos);
+        ChunkAccess oldTerrain = terrain.oldTerrain();
+        ChunkAccess newTerrain = terrain.newTerrain();
         ChunkAccess current = currentTag == null
                 ? oldTerrain
                 : ChunkSerializer.read(session.oldWorld(), session.oldWorld().getPoiManager(), chunkPos, currentTag);

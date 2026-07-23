@@ -38,8 +38,8 @@ public final class ServerChunkEraseService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Queue<EraseJob> JOBS = new ArrayDeque<>();
     private static final int CHUNKS_PER_TICK = 24;
-    private static final int REGENERATE_CHUNKS_PER_TICK = 1;
-    private static final int TRANSITION_CHUNKS = 8;
+    private static final int REGENERATE_CHUNKS_PER_TICK = 4;
+    private static final int TRANSITION_CHUNKS = 4;
     private static final int MAX_REGENERATE_CHUNKS = 65536;
     private static final int MAX_RETRIES = 1200;
 
@@ -179,6 +179,9 @@ public final class ServerChunkEraseService {
                     completed.add(pending.pos);
                 }
             }
+            if (operation == ChunkOperation.REGENERATE && !completed.isEmpty()) {
+                flushRegeneratedChunks();
+            }
             if (!completed.isEmpty()) {
                 ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
                         new DeletedChunksPacket(operation, List.copyOf(completed)));
@@ -241,24 +244,48 @@ public final class ServerChunkEraseService {
 
         private boolean regenerate(PendingChunk pending) throws Exception {
             ChunkMap chunkMap = level.getChunkSource().chunkMap;
-            boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
-            CompoundTag current = regionExists
-                    ? chunkMap.read(pending.pos).join().orElse(null) : null;
-            if (current == null && pending.transitionDistance > 0) {
-                return false;
-            }
             if (regenerationSession == null) {
                 regenerationSession = new TerrainRegenerationSession(level, targetSeed);
             }
-            CompoundTag merged = ChunkTerrainMerger.merge(
-                    level, regenerationSession, pending.pos, current, pending.transitionDistance, targetSeed);
-            chunkMap.write(pending.pos, merged);
-            if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
-                AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
+            TerrainRegenerationSession session = regenerationSession;
+            session.request(pending.pos);
+            TerrainRegenerationSession.TerrainPair terrain = session.completed(pending.pos);
+            if (terrain == null) {
+                if (pending.retries++ < MAX_RETRIES) {
+                    queue.add(pending);
+                } else {
+                    skipped++;
+                    LOGGER.warn("MC 存档区块编辑器等待地形预取超时，跳过 {}", pending.pos);
+                }
+                return false;
             }
+            try {
+                boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
+                CompoundTag current = regionExists
+                        ? chunkMap.read(pending.pos).join().orElse(null) : null;
+                if (current == null && pending.transitionDistance > 0) {
+                    return false;
+                }
+                CompoundTag merged = ChunkTerrainMerger.merge(
+                        level, session, terrain, pending.pos, current, pending.transitionDistance, targetSeed);
+                chunkMap.write(pending.pos, merged);
+                if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
+                    AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
+                }
+                return true;
+            } finally {
+                session.release(pending.pos);
+            }
+        }
+
+        private void flushRegeneratedChunks() {
+            ChunkMap chunkMap = level.getChunkSource().chunkMap;
             chunkMap.flushWorker();
-            poiStorage.flush();
-            return true;
+            try {
+                poiStorage.flush();
+            } catch (IOException exception) {
+                LOGGER.warn("MC 存档区块编辑器刷新 POI 存储失败", exception);
+            }
         }
 
         private boolean updateIfPresent(ChunkPos pos) throws IOException {
@@ -365,6 +392,9 @@ public final class ServerChunkEraseService {
 
         private boolean isDone() {
             if (queue.isEmpty()) {
+                if (regenerationSession != null && !regenerationSession.isIdle()) {
+                    return false;
+                }
                 if (regenerationSession != null) {
                     regenerationSession.close();
                 }
