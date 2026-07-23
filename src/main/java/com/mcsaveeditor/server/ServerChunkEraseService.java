@@ -40,7 +40,7 @@ public final class ServerChunkEraseService {
     private static final Queue<EraseJob> JOBS = new ArrayDeque<>();
     private static final int CHUNKS_PER_TICK = 24;
     private static final int REGENERATE_CHUNKS_PER_TICK = 4;
-    private static final int TRANSITION_CHUNKS = 2;
+    private static final int TRANSITION_CHUNKS = 5;
     private static final int MAX_REGENERATE_CHUNKS = 65536;
     private static final int MAX_RETRIES = 1200;
     private static final long REGENERATE_TIME_BUDGET_NS = 40_000_000L;
@@ -279,7 +279,8 @@ public final class ServerChunkEraseService {
             }
             TerrainRegenerationSession.TerrainPair terrain = regenerationSession.pair(pending.pos);
             CompoundTag merged = ChunkTerrainMerger.merge(
-                    level, regenerationSession, terrain, pending.pos, current, pending.transitionDistance, targetSeed);
+                    level, regenerationSession, terrain, pending.pos, current,
+                    pending.transitionDistance, TRANSITION_CHUNKS, targetSeed);
             chunkMap.write(pending.pos, merged);
             if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
                 AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);

@@ -1,7 +1,6 @@
 package com.mcsaveeditor.server;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -31,6 +30,8 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.material.FluidState;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -39,12 +40,15 @@ import java.util.Map;
 import java.util.Set;
 
 final class ChunkTerrainMerger {
+    private static final int DEEP_BLEND_DEPTH = 24;
+
     private ChunkTerrainMerger() {
     }
 
     static CompoundTag merge(ServerLevel sourceWorld, TerrainRegenerationSession session,
                              TerrainRegenerationSession.TerrainPair terrain, ChunkPos chunkPos,
-                             @Nullable CompoundTag currentTag, int transitionDistance, long targetSeed) {
+                             @Nullable CompoundTag currentTag, int transitionDistance, int maxTransition,
+                             long targetSeed) {
         ChunkAccess oldTerrain = terrain.oldTerrain();
         ChunkAccess newTerrain = terrain.newTerrain();
         ChunkAccess current = currentTag == null
@@ -54,12 +58,17 @@ final class ChunkTerrainMerger {
         int minY = sourceWorld.getMinBuildHeight();
         int maxY = sourceWorld.getMaxBuildHeight();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos samplePos = new BlockPos.MutableBlockPos();
+
         for (int localX = 0; localX < 16; localX++) {
             for (int localZ = 0; localZ < 16; localZ++) {
                 int blockX = chunkPos.getMinBlockX() + localX;
                 int blockZ = chunkPos.getMinBlockZ() + localZ;
-                boolean useNewTerrain = transitionDistance == 0
-                        || transitionColumn(blockX, blockZ, transitionDistance, targetSeed);
+                double blend = blendFactor(transitionDistance, maxTransition, blockX, blockZ, targetSeed);
+                int oldH = groundSurfaceY(oldTerrain, blockX, blockZ, minY, maxY);
+                int newH = groundSurfaceY(newTerrain, blockX, blockZ, minY, maxY);
+                int targetH = (int) Math.round(lerp(oldH, newH, blend));
+
                 for (int y = minY; y < maxY; y++) {
                     pos.set(blockX, y, blockZ);
                     BlockState currentState = current.getBlockState(pos);
@@ -69,16 +78,24 @@ final class ChunkTerrainMerger {
                             newTerrain.setBlockState(pos, currentState, false);
                         }
                         newTerrain.removeBlockEntity(pos);
-                    } else if (!useNewTerrain) {
-                        newTerrain.setBlockState(pos, oldState, false);
+                        continue;
+                    }
+                    if (blend >= 0.999D) {
+                        continue;
+                    }
+                    BlockState blended = blendBlockState(
+                            oldTerrain, newTerrain, samplePos, blockX, y, blockZ,
+                            oldH, newH, targetH, blend, targetSeed, minY, maxY);
+                    if (blended != newTerrain.getBlockState(pos)) {
+                        newTerrain.setBlockState(pos, blended, false);
                         newTerrain.removeBlockEntity(pos);
                     }
                 }
             }
         }
 
-        mergeBiomes(oldTerrain, newTerrain, chunkPos, transitionDistance, targetSeed);
-        mergeBlockEntities(currentTag, oldTerrain, newTerrain, transitionDistance, targetSeed);
+        mergeBiomes(oldTerrain, newTerrain, chunkPos, transitionDistance, maxTransition, targetSeed);
+        mergeBlockEntities(currentTag, oldTerrain, newTerrain, transitionDistance, maxTransition, targetSeed);
         CompoundTag result = ChunkSerializer.write(session.newWorld(), newTerrain);
         if (currentTag != null) {
             copyIfPresent(currentTag, result, "InhabitedTime");
@@ -90,6 +107,131 @@ final class ChunkTerrainMerger {
         return result;
     }
 
+    private static BlockState blendBlockState(ChunkAccess oldTerrain, ChunkAccess newTerrain,
+                                              BlockPos.MutableBlockPos samplePos,
+                                              int x, int y, int z,
+                                              int oldH, int newH, int targetH,
+                                              double blend, long seed, int minY, int maxY) {
+        int depth = targetH - y;
+        if (depth < 0) {
+            samplePos.set(x, y, z);
+            BlockState oldAbs = oldTerrain.getBlockState(samplePos);
+            BlockState newAbs = newTerrain.getBlockState(samplePos);
+            boolean oldFluid = isFluid(oldAbs);
+            boolean newFluid = isFluid(newAbs);
+            if (blend >= 0.5D) {
+                if (newFluid) {
+                    return newAbs;
+                }
+                if (oldFluid) {
+                    return oldAbs;
+                }
+                return newAbs;
+            }
+            if (oldFluid) {
+                return oldAbs;
+            }
+            if (newFluid) {
+                return newAbs;
+            }
+            return oldAbs;
+        }
+
+        BlockState fromOld;
+        BlockState fromNew;
+        if (depth > DEEP_BLEND_DEPTH) {
+            samplePos.set(x, y, z);
+            fromOld = oldTerrain.getBlockState(samplePos);
+            fromNew = newTerrain.getBlockState(samplePos);
+        } else {
+            int oldY = clamp(oldH - depth, minY, maxY - 1);
+            int newY = clamp(newH - depth, minY, maxY - 1);
+            samplePos.set(x, oldY, z);
+            fromOld = oldTerrain.getBlockState(samplePos);
+            samplePos.set(x, newY, z);
+            fromNew = newTerrain.getBlockState(samplePos);
+            if (isAirLike(fromOld) && oldY < oldH && depth > 0) {
+                samplePos.set(x, clamp(oldH - Math.max(depth, 1), minY, maxY - 1), z);
+                BlockState deeper = oldTerrain.getBlockState(samplePos);
+                if (!isAirLike(deeper)) {
+                    fromOld = deeper;
+                }
+            }
+            if (isAirLike(fromNew) && newY < newH && depth > 0) {
+                samplePos.set(x, clamp(newH - Math.max(depth, 1), minY, maxY - 1), z);
+                BlockState deeper = newTerrain.getBlockState(samplePos);
+                if (!isAirLike(deeper)) {
+                    fromNew = deeper;
+                }
+            }
+        }
+
+        double pick = clamp(blend + (smoothNoise(x, z, seed ^ 0x9E3779B97F4A7C15L) - 0.5D) * 0.18D, 0.0D, 1.0D);
+        if (pick >= 0.5D) {
+            if (isAirLike(fromNew) && !isAirLike(fromOld) && depth > 0) {
+                return fromOld;
+            }
+            return fromNew;
+        }
+        if (isAirLike(fromOld) && !isAirLike(fromNew) && depth > 0) {
+            return fromNew;
+        }
+        return fromOld;
+    }
+
+    private static double blendFactor(int distance, int maxTransition, int blockX, int blockZ, long seed) {
+        if (maxTransition <= 0 || distance <= 0) {
+            return 1.0D;
+        }
+        if (distance >= maxTransition) {
+            return clamp(smoothNoise(blockX, blockZ, seed) * 0.12D, 0.0D, 0.15D);
+        }
+        double linear = 1.0D - (double) distance / (double) maxTransition;
+        double smooth = linear * linear * (3.0D - 2.0D * linear);
+        double jitter = (smoothNoise(blockX, blockZ, seed) - 0.5D) * 0.22D;
+        return clamp(smooth + jitter, 0.0D, 1.0D);
+    }
+
+    private static int groundSurfaceY(ChunkAccess chunk, int blockX, int blockZ, int minY, int maxY) {
+        int localX = blockX & 15;
+        int localZ = blockZ & 15;
+        int top = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, localX, localZ) - 1;
+        if (top >= minY && top < maxY) {
+            BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos(blockX, top, blockZ);
+            BlockState state = chunk.getBlockState(probe);
+            if (!isAirLike(state) && !state.is(BlockTags.LEAVES) && !state.is(BlockTags.LOGS)) {
+                return top;
+            }
+        }
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(blockX, 0, blockZ);
+        for (int y = maxY - 1; y >= minY; y--) {
+            pos.setY(y);
+            BlockState state = chunk.getBlockState(pos);
+            if (isAirLike(state) || isFluid(state) || state.is(BlockTags.LEAVES) || state.is(BlockTags.LOGS)) {
+                continue;
+            }
+            return y;
+        }
+        return minY;
+    }
+
+    private static boolean isAirLike(BlockState state) {
+        return state.isAir();
+    }
+
+    private static boolean isFluid(BlockState state) {
+        FluidState fluid = state.getFluidState();
+        return !fluid.isEmpty();
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
     private static void copyIfPresent(CompoundTag source, CompoundTag target, String key) {
         if (source.contains(key)) {
             target.put(key, source.get(key).copy());
@@ -98,7 +240,7 @@ final class ChunkTerrainMerger {
 
     @SuppressWarnings("unchecked")
     private static void mergeBiomes(ChunkAccess oldTerrain, ChunkAccess newTerrain, ChunkPos chunkPos,
-                                    int transitionDistance, long seed) {
+                                    int transitionDistance, int maxTransition, long seed) {
         if (transitionDistance == 0) {
             return;
         }
@@ -111,7 +253,7 @@ final class ChunkTerrainMerger {
                 for (int quartZ = 0; quartZ < 4; quartZ++) {
                     int blockX = chunkPos.getMinBlockX() + quartX * 4 + 2;
                     int blockZ = chunkPos.getMinBlockZ() + quartZ * 4 + 2;
-                    if (transitionColumn(blockX, blockZ, transitionDistance, seed)) {
+                    if (blendFactor(transitionDistance, maxTransition, blockX, blockZ, seed) >= 0.5D) {
                         continue;
                     }
                     for (int quartY = 0; quartY < 4; quartY++) {
@@ -121,17 +263,6 @@ final class ChunkTerrainMerger {
                 }
             }
         }
-    }
-
-    private static boolean transitionColumn(int blockX, int blockZ, int distance, long seed) {
-        if (distance <= 1) {
-            return true;
-        }
-        if (distance >= 8) {
-            return false;
-        }
-        double threshold = (8.0D - distance) / 7.0D;
-        return smoothNoise(blockX, blockZ, seed) < threshold;
     }
 
     private static double smoothNoise(int blockX, int blockZ, long seed) {
@@ -209,7 +340,8 @@ final class ChunkTerrainMerger {
     }
 
     private static void mergeBlockEntities(@Nullable CompoundTag currentTag, ChunkAccess oldTerrain,
-                                           ChunkAccess newTerrain, int transitionDistance, long seed) {
+                                           ChunkAccess newTerrain, int transitionDistance, int maxTransition,
+                                           long seed) {
         Map<BlockPos, CompoundTag> current = currentTag == null
                 ? saveBlockEntities(oldTerrain) : readBlockEntities(currentTag);
         Map<BlockPos, CompoundTag> old = saveBlockEntities(oldTerrain);
@@ -230,9 +362,8 @@ final class ChunkTerrainMerger {
             if (playerModified) {
                 desired = currentNbt;
             } else {
-                boolean useNew = transitionDistance == 0
-                        || transitionColumn(pos.getX(), pos.getZ(), transitionDistance, seed);
-                desired = useNew ? generatedNew.get(pos) : oldNbt;
+                double blend = blendFactor(transitionDistance, maxTransition, pos.getX(), pos.getZ(), seed);
+                desired = blend >= 0.5D ? generatedNew.get(pos) : oldNbt;
             }
             if (desired == null) {
                 continue;
