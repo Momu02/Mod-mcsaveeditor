@@ -87,7 +87,7 @@ final class TerrainRegenerationSession implements AutoCloseable {
 
     private ChunkAccess generate(ServerLevel world, ChunkPos pos) {
         var future =
-                world.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FEATURES, true);
+                world.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.SURFACE, true);
         world.getServer().managedBlock(future::isDone);
         return future.join().left().orElseThrow(() -> new IllegalStateException("无法生成区块 " + pos));
     }
