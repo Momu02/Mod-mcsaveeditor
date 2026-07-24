@@ -61,7 +61,7 @@ import java.util.Set;
 
 final class ChunkTerrainMerger {
     private static final int DEEP_BLEND_DEPTH = 24;
-    private static final int EDGE_BLEND_BLOCKS = 12;
+    private static final int EDGE_BLEND_BLOCKS = 32;
 
     private ChunkTerrainMerger() {
     }

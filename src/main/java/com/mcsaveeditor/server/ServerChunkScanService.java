@@ -44,7 +44,7 @@ public final class ServerChunkScanService {
         int maxInhabitedMinutes = Math.max(request.maxInhabitedMinutes(), 0);
         long maxInhabitedTicks = Math.min((long) maxInhabitedMinutes * 1200L, Long.MAX_VALUE);
         List<ProtectedArea> protectedAreas = new ArrayList<>();
-        int guardDistance = level.getServer().getPlayerList().getViewDistance() + 2;
+        int guardDistance = level.getServer().getPlayerList().getViewDistance();
         for (ServerPlayer onlinePlayer : level.players()) {
             protectedAreas.add(new ProtectedArea(onlinePlayer.chunkPosition(), guardDistance));
         }
