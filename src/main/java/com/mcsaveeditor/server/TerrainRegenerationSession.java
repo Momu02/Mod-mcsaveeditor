@@ -4,7 +4,6 @@ import net.minecraft.Util;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.progress.ChunkProgressListener;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.dimension.LevelStem;
@@ -15,7 +14,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 final class TerrainRegenerationSession implements AutoCloseable {
     private static final ChunkProgressListener NO_PROGRESS = new ChunkProgressListener() {
@@ -38,42 +39,39 @@ final class TerrainRegenerationSession implements AutoCloseable {
 
     private final ServerLevel source;
     private final Path root;
-    private final LevelStorageSource oldStorage;
-    private final LevelStorageSource newStorage;
-    private final LevelStorageSource.LevelStorageAccess oldAccess;
-    private final LevelStorageSource.LevelStorageAccess newAccess;
-    private final ServerLevel oldWorld;
-    private final ServerLevel newWorld;
+    private final LevelStorageSource.LevelStorageAccess access;
+    private final ServerLevel genWorld;
+    private final Map<Long, ChunkAccess> cache = new HashMap<>();
 
     TerrainRegenerationSession(ServerLevel source, long targetSeed) throws IOException {
         this.source = source;
         this.root = Files.createTempDirectory("mcsaveeditor-worldgen-");
-        this.oldStorage = LevelStorageSource.createDefault(root.resolve("old"));
-        this.newStorage = LevelStorageSource.createDefault(root.resolve("new"));
-        this.oldAccess = oldStorage.createAccess("world");
-        this.newAccess = newStorage.createAccess("world");
-        this.oldWorld = createWorld(oldAccess, source.getSeed());
-        this.newWorld = createWorld(newAccess, targetSeed);
+        LevelStorageSource storage = LevelStorageSource.createDefault(root.resolve("gen"));
+        this.access = storage.createAccess("world");
+        this.genWorld = createWorld(source, access, targetSeed);
     }
 
-    ChunkAccess oldChunk(ChunkPos pos) {
-        return generate(oldWorld, pos);
+    ChunkAccess generate(ChunkPos pos) {
+        long key = pos.toLong();
+        ChunkAccess cached = cache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        var future = genWorld.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.SURFACE, true);
+        source.getServer().managedBlock(future::isDone);
+        ChunkAccess chunk = future.join().left()
+                .orElseThrow(() -> new IllegalStateException("无法生成区块 " + pos));
+        cache.put(key, chunk);
+        return chunk;
     }
 
-    ChunkAccess newChunk(ChunkPos pos) {
-        return generate(newWorld, pos);
+    ServerLevel genWorld() {
+        return genWorld;
     }
 
-    ServerLevel oldWorld() {
-        return oldWorld;
-    }
-
-    ServerLevel newWorld() {
-        return newWorld;
-    }
-
-    private ServerLevel createWorld(LevelStorageSource.LevelStorageAccess access, long worldSeed) {
-        return new ServerLevel(
+    private static ServerLevel createWorld(ServerLevel source, LevelStorageSource.LevelStorageAccess access,
+                                           long worldSeed) {
+        ServerLevel world = new ServerLevel(
                 source.getServer(), Util.backgroundExecutor(), access,
                 (ServerLevelData) source.getLevelData(), source.dimension(),
                 new LevelStem(source.dimensionTypeRegistration(), source.getChunkSource().getGenerator()),
@@ -83,34 +81,23 @@ final class TerrainRegenerationSession implements AutoCloseable {
                 return worldSeed;
             }
         };
-    }
-
-    private ChunkAccess generate(ServerLevel world, ChunkPos pos) {
-        var future =
-                world.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.SURFACE, true);
-        world.getServer().managedBlock(future::isDone);
-        return future.join().left().orElseThrow(() -> new IllegalStateException("无法生成区块 " + pos));
+        world.noSave = true;
+        return world;
     }
 
     @Override
     public void close() {
-        try {
-            oldWorld.close();
-        } catch (IOException ignored) {
-        }
-        try {
-            newWorld.close();
-        } catch (IOException ignored) {
-        }
-        try {
-            oldAccess.close();
-        } catch (IOException ignored) {
-        }
-        try {
-            newAccess.close();
-        } catch (IOException ignored) {
-        }
+        cache.clear();
+        closeQuietly(genWorld);
+        closeQuietly(access);
         deleteTree(root);
+    }
+
+    private static void closeQuietly(AutoCloseable closeable) {
+        try {
+            closeable.close();
+        } catch (Exception ignored) {
+        }
     }
 
     private static void deleteTree(Path root) {
