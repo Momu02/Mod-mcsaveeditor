@@ -3,7 +3,6 @@ package com.mcsaveeditor.server;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.resources.ResourceLocation;
@@ -65,9 +64,8 @@ final class ChunkTerrainMerger {
     private ChunkTerrainMerger() {
     }
 
-    static CompoundTag merge(ServerLevel sourceWorld, TerrainRegenerationSession session,
-                             ChunkAccess generatedNew, ChunkPos chunkPos,
-                             CompoundTag currentTag, Set<Long> selectedChunks, long targetSeed) {
+    static CompoundTag merge(ServerLevel sourceWorld, ChunkAccess generatedNew, ChunkPos chunkPos,
+                             CompoundTag currentTag, Set<Long> selectedChunks, long targetSeed, int blendBlocks) {
         ChunkAccess current = ChunkSerializer.read(
                 sourceWorld, sourceWorld.getPoiManager(), chunkPos, currentTag);
 
@@ -80,7 +78,7 @@ final class ChunkTerrainMerger {
             for (int localZ = 0; localZ < 16; localZ++) {
                 int blockX = chunkPos.getMinBlockX() + localX;
                 int blockZ = chunkPos.getMinBlockZ() + localZ;
-                double blend = edgeBlendFactor(blockX, blockZ, selectedChunks, targetSeed);
+                double blend = edgeBlendFactor(blockX, blockZ, selectedChunks, targetSeed, blendBlocks);
                 int oldH = groundSurfaceY(current, blockX, blockZ, minY, maxY);
                 int newH = groundSurfaceY(generatedNew, blockX, blockZ, minY, maxY);
                 int targetH = (int) Math.round(lerp(oldH, newH, blend));
@@ -120,10 +118,10 @@ final class ChunkTerrainMerger {
             }
         }
 
-        mergeBiomes(current, generatedNew, chunkPos, selectedChunks, targetSeed);
-        mergeBlockEntities(currentTag, current, generatedNew, selectedChunks, targetSeed);
+        mergeBiomes(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks);
+        mergeBlockEntities(currentTag, current, generatedNew, selectedChunks, targetSeed, blendBlocks);
 
-        CompoundTag tag = ChunkSerializer.write(session.genWorld(), generatedNew);
+        CompoundTag tag = ChunkSerializer.write(sourceWorld, generatedNew);
         if (currentTag != null) {
             copyIfPresent(currentTag, tag, "InhabitedTime");
             copyIfPresent(currentTag, tag, "LastUpdate");
@@ -297,12 +295,12 @@ final class ChunkTerrainMerger {
                 || state.is(Blocks.SMOOTH_QUARTZ);
     }
 
-    private static double edgeBlendFactor(int blockX, int blockZ, Set<Long> selectedChunks, long seed) {
-        int dist = distanceToOutside(blockX, blockZ, selectedChunks, EDGE_BLEND_BLOCKS);
-        if (dist >= EDGE_BLEND_BLOCKS) {
+    private static double edgeBlendFactor(int blockX, int blockZ, Set<Long> selectedChunks, long seed, int blendBlocks) {
+        int dist = distanceToOutside(blockX, blockZ, selectedChunks, blendBlocks);
+        if (dist >= blendBlocks) {
             return 1.0D;
         }
-        double linear = (double) dist / (double) EDGE_BLEND_BLOCKS;
+        double linear = (double) dist / (double) blendBlocks;
         return linear * linear * (3.0D - 2.0D * linear);
     }
 
@@ -424,7 +422,7 @@ final class ChunkTerrainMerger {
 
     @SuppressWarnings("unchecked")
     private static void mergeBiomes(ChunkAccess current, ChunkAccess generatedNew,
-                                    ChunkPos chunkPos, Set<Long> selectedChunks, long seed) {
+                                    ChunkPos chunkPos, Set<Long> selectedChunks, long seed, int blendBlocks) {
         LevelChunkSection[] oldSections = current.getSections();
         LevelChunkSection[] newSections = generatedNew.getSections();
         for (int sectionIndex = 0; sectionIndex < Math.min(newSections.length, newSections.length); sectionIndex++) {
@@ -437,7 +435,7 @@ final class ChunkTerrainMerger {
                 for (int quartZ = 0; quartZ < 4; quartZ++) {
                     int blockX = chunkPos.getMinBlockX() + quartX * 4 + 2;
                     int blockZ = chunkPos.getMinBlockZ() + quartZ * 4 + 2;
-                    boolean useOld = edgeBlendFactor(blockX, blockZ, selectedChunks, seed) < 0.5D
+                    boolean useOld = edgeBlendFactor(blockX, blockZ, selectedChunks, seed, blendBlocks) < 0.5D
                             && sectionIndex < oldSections.length && oldSections[sectionIndex] != null;
                     for (int quartY = 0; quartY < 4; quartY++) {
                         Holder<Biome> biome = useOld
@@ -524,7 +522,7 @@ final class ChunkTerrainMerger {
     }
 
     private static void mergeBlockEntities(CompoundTag currentTag, ChunkAccess current, ChunkAccess generatedNew,
-                                           Set<Long> selectedChunks, long seed) {
+                                           Set<Long> selectedChunks, long seed, int blendBlocks) {
         Map<BlockPos, CompoundTag> currentBes = readBlockEntities(currentTag);
 
         for (BlockPos placePos : new HashSet<>(getBlockEntityMap(generatedNew).keySet())) {
@@ -548,7 +546,7 @@ final class ChunkTerrainMerger {
             if (getBlockEntityMap(generatedNew).containsKey(pos)) {
                 continue;
             }
-            if (edgeBlendFactor(pos.getX(), pos.getZ(), selectedChunks, seed) < 0.5D) {
+            if (edgeBlendFactor(pos.getX(), pos.getZ(), selectedChunks, seed, blendBlocks) < 0.5D) {
                 continue;
             }
             BlockState state = generatedNew.getBlockState(pos);
