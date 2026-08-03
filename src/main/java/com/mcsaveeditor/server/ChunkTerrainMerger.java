@@ -51,7 +51,6 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 
 import java.util.HashMap;
@@ -61,7 +60,7 @@ import java.util.Set;
 
 final class ChunkTerrainMerger {
     private static final int DEEP_BLEND_DEPTH = 24;
-    private static final int EDGE_BLEND_BLOCKS = 32;
+    private static final int EDGE_BLEND_BLOCKS = 64;
 
     private ChunkTerrainMerger() {
     }
@@ -304,9 +303,7 @@ final class ChunkTerrainMerger {
             return 1.0D;
         }
         double linear = (double) dist / (double) EDGE_BLEND_BLOCKS;
-        double smooth = linear * linear * (3.0D - 2.0D * linear);
-        double jitter = (smoothNoise(blockX, blockZ, seed) - 0.5D) * 0.16D;
-        return clamp(smooth + jitter, 0.0D, 1.0D);
+        return linear * linear * (3.0D - 2.0D * linear);
     }
 
     private static int distanceToOutside(int blockX, int blockZ, Set<Long> selectedChunks, int maxDist) {
@@ -348,13 +345,13 @@ final class ChunkTerrainMerger {
                 if (oldFluid) {
                     return oldAbs;
                 }
-                return Blocks.AIR.defaultBlockState();
-            }
-            if (oldFluid) {
-                return oldAbs;
-            }
-            if (newFluid) {
-                return newAbs;
+            } else {
+                if (oldFluid) {
+                    return oldAbs;
+                }
+                if (newFluid) {
+                    return newAbs;
+                }
             }
             return Blocks.AIR.defaultBlockState();
         }
@@ -374,7 +371,7 @@ final class ChunkTerrainMerger {
             fromNew = newTerrain.getBlockState(samplePos);
         }
 
-        double pick = clamp(blend + (smoothNoise(x, z, seed ^ 0x9E3779B97F4A7C15L) - 0.5D) * 0.18D, 0.0D, 1.0D);
+        double pick = materialPick(x, z, blend, seed);
         if (pick >= 0.5D) {
             if (fromNew.isAir() && !fromOld.isAir() && depth > 0) {
                 return fromOld;
@@ -387,22 +384,18 @@ final class ChunkTerrainMerger {
         return fromOld;
     }
 
+    private static double materialPick(int blockX, int blockZ, double blend, long seed) {
+        double jitter = (smoothNoise(blockX, blockZ, seed ^ 0x9E3779B97F4A7C15L) - 0.5D) * 0.12D;
+        return clamp(blend + jitter, 0.0D, 1.0D);
+    }
+
     private static int groundSurfaceY(ChunkAccess chunk, int blockX, int blockZ, int minY, int maxY) {
-        int localX = blockX & 15;
-        int localZ = blockZ & 15;
-        int top = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, localX, localZ) - 1;
-        if (top >= minY && top < maxY) {
-            BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos(blockX, top, blockZ);
-            BlockState state = chunk.getBlockState(probe);
-            if (!state.isAir() && !isFluid(state) && !state.is(BlockTags.LEAVES) && !state.is(BlockTags.LOGS)) {
-                return top;
-            }
-        }
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(blockX, 0, blockZ);
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(blockX, maxY - 1, blockZ);
         for (int y = maxY - 1; y >= minY; y--) {
             pos.setY(y);
             BlockState state = chunk.getBlockState(pos);
-            if (state.isAir() || isFluid(state) || state.is(BlockTags.LEAVES) || state.is(BlockTags.LOGS)) {
+            if (state.isAir() || isFluid(state) || state.is(BlockTags.LEAVES) || state.is(BlockTags.LOGS)
+                    || isArtificialBuildBlock(state)) {
                 continue;
             }
             return y;

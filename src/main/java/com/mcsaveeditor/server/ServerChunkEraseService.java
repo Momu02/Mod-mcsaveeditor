@@ -366,7 +366,7 @@ public final class ServerChunkEraseService {
         }
 
         private boolean isNearAnyPlayer(ChunkPos target) {
-            int guardDistance = level.getServer().getPlayerList().getViewDistance();
+            int guardDistance = level.getServer().getPlayerList().getViewDistance() + 1;
             for (ServerPlayer player : level.players()) {
                 ChunkPos playerPos = player.chunkPosition();
                 int dx = Math.abs(playerPos.x - target.x);

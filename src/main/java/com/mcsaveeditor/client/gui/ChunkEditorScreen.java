@@ -88,8 +88,9 @@ public class ChunkEditorScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("清除选择"), button -> selected.clear())
                 .bounds(x, y + 84, 92, 20)
                 .build());
-        addRenderableWidget(Button.builder(Component.literal("升级区块数据"), button -> sendOperation(ChunkOperation.UPDATE))
-                .bounds(x + 100, y + 84, 88, 20)
+        addRenderableWidget(Button.builder(Component.literal("重建区块地形（保留建筑）"),
+                        button -> sendOperation(ChunkOperation.REGENERATE))
+                .bounds(x, y + 84, 188, 20)
                 .build());
         addRenderableWidget(Button.builder(Component.literal("彻底删除所选区块").withStyle(ChatFormatting.RED),
                         button -> sendOperation(ChunkOperation.DELETE))
@@ -100,12 +101,8 @@ public class ChunkEditorScreen extends Screen {
         seedBox = new EditBox(font, x + 100, y + 140, 88, 20, Component.literal("目标种子"));
         seedBox.setValue("0");
         addRenderableWidget(seedBox);
-        addRenderableWidget(Button.builder(Component.literal("重建地形（过渡 8）"),
-                        button -> sendOperation(ChunkOperation.REGENERATE))
-                .bounds(x, y + 168, 142, 20)
-                .build());
         addRenderableWidget(Button.builder(Component.literal("关闭"), button -> onClose())
-                .bounds(x + 148, y + 168, 40, 20)
+                .bounds(x, y + 168, 188, 20)
                 .build());
     }
 
