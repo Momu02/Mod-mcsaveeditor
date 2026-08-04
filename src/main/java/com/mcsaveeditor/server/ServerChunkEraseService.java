@@ -14,8 +14,10 @@ import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.Util;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
@@ -34,15 +36,14 @@ import java.util.List;
 import java.util.Queue;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 public final class ServerChunkEraseService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Queue<EraseJob> JOBS = new ArrayDeque<>();
     private static final int CHUNKS_PER_TICK = 24;
-    private static final int REGENERATE_CHUNKS_PER_TICK = 4;
     private static final int MAX_REGENERATE_CHUNKS = 65536;
     private static final int MAX_RETRIES = 1200;
-    private static final long REGENERATE_TIME_BUDGET_NS = 40_000_000L;
 
     private ServerChunkEraseService() {
     }
@@ -115,6 +116,9 @@ public final class ServerChunkEraseService {
         private final Set<Long> selectedChunks;
         private final int blendBlocks;
         private final int total;
+        private CompletableFuture<ChunkAccess> pendingGen;
+        private PendingChunk pendingGenPos;
+        private CompoundTag pendingGenCurrent;
         private int processed;
         private int skipped;
         private int progressMarker;
@@ -152,13 +156,15 @@ public final class ServerChunkEraseService {
         }
 
         private void tick() {
-            int limit = operation == ChunkOperation.REGENERATE ? REGENERATE_CHUNKS_PER_TICK : CHUNKS_PER_TICK;
-            long deadline = operation == ChunkOperation.REGENERATE
-                    ? System.nanoTime() + REGENERATE_TIME_BUDGET_NS : Long.MAX_VALUE;
+            if (operation == ChunkOperation.REGENERATE) {
+                tickRegenerate();
+                return;
+            }
+            int limit = CHUNKS_PER_TICK;
             List<ChunkPos> completed = new ArrayList<>(limit);
             List<ChunkPos> skippedThisTick = new ArrayList<>(limit);
             int remainingLookups = queue.size();
-            while (remainingLookups-- > 0 && !queue.isEmpty() && completed.size() < limit && System.nanoTime() < deadline) {
+            while (remainingLookups-- > 0 && !queue.isEmpty() && completed.size() < limit) {
                 PendingChunk pending = queue.poll();
                 if (pending == null) {
                     continue;
@@ -172,10 +178,6 @@ public final class ServerChunkEraseService {
                     continue;
                 }
             }
-            if (operation == ChunkOperation.REGENERATE && !completed.isEmpty()) {
-                flushRegeneratedChunks();
-                maybeReportProgress();
-            }
             List<ChunkPos> allProcessed = new ArrayList<>(completed.size() + skippedThisTick.size());
             allProcessed.addAll(completed);
             allProcessed.addAll(skippedThisTick);
@@ -183,6 +185,76 @@ public final class ServerChunkEraseService {
                 ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
                         new DeletedChunksPacket(operation, List.copyOf(allProcessed)));
             }
+        }
+
+        private void tickRegenerate() {
+            List<ChunkPos> completed = new ArrayList<>(1);
+            if (pendingGen != null) {
+                if (pendingGen.isDone()) {
+                    try {
+                        ChunkAccess generated = pendingGen.join();
+                        finishRegenerate(pendingGenPos, pendingGenCurrent, generated);
+                        completed.add(pendingGenPos.pos);
+                        processed++;
+                    } catch (Exception exception) {
+                        skipped++;
+                        LOGGER.error("MC 存档区块编辑器处理区块 {} 失败", pendingGenPos.pos, exception);
+                    }
+                    pendingGen = null;
+                    pendingGenPos = null;
+                    pendingGenCurrent = null;
+                }
+            } else if (!queue.isEmpty()) {
+                PendingChunk pending = queue.poll();
+                if (pending != null) {
+                    if (isNearAnyPlayer(pending.pos) || level.getChunkSource().hasChunk(pending.pos.x, pending.pos.z)) {
+                        deferOrSkip(pending);
+                    } else {
+                        ChunkMap chunkMap = level.getChunkSource().chunkMap;
+                        boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
+                        CompoundTag current = regionExists
+                                ? chunkMap.read(pending.pos).join().orElse(null) : null;
+                        ChunkPos pos = pending.pos;
+                        long seed = targetSeed;
+                        pendingGenPos = pending;
+                        pendingGenCurrent = current;
+                        pendingGen = CompletableFuture.supplyAsync(
+                                () -> TerrainGeneration.generate(level, pos, seed), Util.backgroundExecutor());
+                    }
+                }
+            }
+            if (!completed.isEmpty()) {
+                flushRegeneratedChunks();
+                maybeReportProgress();
+                ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
+                        new DeletedChunksPacket(operation, List.copyOf(completed)));
+            }
+        }
+
+        private void finishRegenerate(PendingChunk pending, CompoundTag current, ChunkAccess generated) {
+            ChunkMap chunkMap = level.getChunkSource().chunkMap;
+            if (processed == 1) {
+                int newH = generated.getHeight(Heightmap.Types.WORLD_SURFACE, 0, 0);
+                int oldH = current == null ? -1
+                        : ChunkSerializer.read(level, level.getPoiManager(), pending.pos, current)
+                                .getHeight(Heightmap.Types.WORLD_SURFACE, 0, 0);
+                LOGGER.info("MC 存档区块编辑器：重建验证 {} targetSeed={} blend={} 新表面高度={} 旧表面高度={}",
+                        pending.pos, targetSeed, blendBlocks, newH, oldH);
+            }
+            CompoundTag merged;
+            if (current == null) {
+                merged = ChunkSerializer.write(level, generated);
+            } else {
+                merged = ChunkTerrainMerger.merge(
+                        level, generated, pending.pos, current, selectedChunks, targetSeed, blendBlocks);
+            }
+            chunkMap.write(pending.pos, merged);
+            if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
+                AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
+            }
+            ChunkPos pos = pending.pos;
+            var future = level.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FULL, true);
+            level.getServer().managedBlock(future::isDone);
         }
 
         private ProcessResult process(PendingChunk pending) {
@@ -238,40 +310,9 @@ public final class ServerChunkEraseService {
         private boolean processStoredChunk(PendingChunk pending) throws Exception {
             return switch (operation) {
                 case UPDATE -> updateIfPresent(pending.pos);
-                case REGENERATE -> regenerate(pending);
                 case DELETE -> eraseIfPresent(pending.pos);
+                default -> false;
             };
-        }
-
-        private boolean regenerate(PendingChunk pending) throws Exception {
-            ChunkMap chunkMap = level.getChunkSource().chunkMap;
-            boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
-            CompoundTag current = regionExists
-                    ? chunkMap.read(pending.pos).join().orElse(null) : null;
-            var generated = TerrainGeneration.generate(level, pending.pos, targetSeed);
-            if (processed == 0) {
-                int newH = generated.getHeight(Heightmap.Types.WORLD_SURFACE, 0, 0);
-                int oldH = current == null ? -1
-                        : ChunkSerializer.read(level, level.getPoiManager(), pending.pos, current)
-                                .getHeight(Heightmap.Types.WORLD_SURFACE, 0, 0);
-                LOGGER.info("MC 存档区块编辑器：重建验证 {} targetSeed={} blend={} 新表面高度={} 旧表面高度={}",
-                        pending.pos, targetSeed, blendBlocks, newH, oldH);
-            }
-            CompoundTag merged;
-            if (current == null) {
-                merged = ChunkSerializer.write(level, generated);
-            } else {
-                merged = ChunkTerrainMerger.merge(
-                        level, generated, pending.pos, current, selectedChunks, targetSeed, blendBlocks);
-            }
-            chunkMap.write(pending.pos, merged);
-            if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
-                AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
-            }
-            ChunkPos pos = pending.pos;
-            var future = level.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FULL, true);
-            level.getServer().managedBlock(future::isDone);
-            return true;
         }
 
         private void flushRegeneratedChunks() {
@@ -387,7 +428,7 @@ public final class ServerChunkEraseService {
         }
 
         private boolean isDone() {
-            if (!queue.isEmpty()) {
+            if (!queue.isEmpty() || pendingGen != null) {
                 return false;
             }
             flushAndClose(poiStorage);
