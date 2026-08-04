@@ -3,14 +3,14 @@ package com.mcsaveeditor.server;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.WorldGenRegion;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.chunk.WorldGenRegion;
+import net.minecraft.world.level.chunk.storage.StructureManager;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
-import net.minecraft.world.level.levelgen.structure.StructureManager;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -36,7 +36,7 @@ final class TerrainGeneration {
         generator.createBiomes(region, chunk);
         CompletableFuture<ChunkAccess> noise = generator.fillFromNoise(region, structures, chunk);
         chunk = (ProtoChunk) noise.join();
-        RandomState randomState = generator.randomState(seed);
+        RandomState randomState = generator.createRandomState(seed);
         generator.buildSurface(region, structures, randomState, chunk);
         chunk.setStatus(ChunkStatus.SURFACE);
         Heightmap.primeHeightmaps(chunk, EnumSet.allOf(Heightmap.Types.class));
