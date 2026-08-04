@@ -2,16 +2,15 @@ package com.mcsaveeditor.server;
 
 import net.minecraft.Util;
 import net.minecraft.core.Holder;
-import net.minecraft.core.HolderGetter;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
-import net.minecraft.world.level.chunk.WorldGenRegion;
-import net.minecraft.world.level.chunk.storage.StructureManager;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
@@ -32,9 +31,7 @@ final class TerrainGeneration {
             throw new IllegalStateException("不支持的地形生成器: " + generator.getClass().getName());
         }
         Holder<NoiseGeneratorSettings> settings = noiseGenerator.generatorSettings();
-        HolderGetter<NoiseGeneratorSettings> holderGetter =
-                level.registryAccess().lookupOrThrow(Registries.NOISE_GENERATOR_SETTINGS);
-        RandomState randomState = RandomState.create(settings.value(), holderGetter, seed);
+        RandomState randomState = RandomState.create(level.registryAccess(), Registries.NOISE_SETTINGS, seed);
         StructureManager structures = level.getStructureManager();
         Blender blender = Blender.empty();
         Executor executor = Util.backgroundExecutor();
