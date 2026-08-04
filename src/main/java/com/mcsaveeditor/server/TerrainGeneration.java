@@ -29,7 +29,7 @@ final class TerrainGeneration {
         ProtoChunk chunk = new ProtoChunk(pos, UpgradeData.EMPTY, level,
                 level.registryAccess().registryOrThrow(Registries.BIOME), null);
         chunk.setStatus(ChunkStatus.EMPTY);
-        StructureManager structures = level.getStructureManager();
+        StructureManager structures = level.structureManager();
         List<ChunkAccess> chunks = List.of(chunk);
         WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.SURFACE, 1) {
             @Override
