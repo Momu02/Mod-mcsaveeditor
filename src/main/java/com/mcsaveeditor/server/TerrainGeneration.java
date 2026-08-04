@@ -31,8 +31,8 @@ final class TerrainGeneration {
             throw new IllegalStateException("不支持的地形生成器: " + generator.getClass().getName());
         }
         Holder<NoiseGeneratorSettings> settings = noiseGenerator.generatorSettings();
-        RandomState randomState = RandomState.create(level.registryAccess(), Registries.NOISE_SETTINGS, seed);
-        StructureManager structures = level.getStructureManager();
+        RandomState randomState = RandomState.create(settings.value(), level.registryAccess().lookupOrThrow(Registries.NOISE), seed);
+        StructureManager structures = level.structureManager();
         Blender blender = Blender.empty();
         Executor executor = Util.backgroundExecutor();
 
