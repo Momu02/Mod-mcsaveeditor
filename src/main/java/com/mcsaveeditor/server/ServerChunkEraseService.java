@@ -231,7 +231,7 @@ public final class ServerChunkEraseService {
             }
         }
 
-        private void finishRegenerate(PendingChunk pending, CompoundTag current, ChunkAccess generated) {
+        private void finishRegenerate(PendingChunk pending, CompoundTag current, ChunkAccess generated) throws IOException {
             ChunkMap chunkMap = level.getChunkSource().chunkMap;
             if (processed == 1) {
                 int newH = generated.getHeight(Heightmap.Types.WORLD_SURFACE, 0, 0);
