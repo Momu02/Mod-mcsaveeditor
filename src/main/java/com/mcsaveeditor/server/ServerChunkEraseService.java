@@ -253,6 +253,7 @@ public final class ServerChunkEraseService {
                 AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
             }
             ChunkPos pos = pending.pos;
+            forgetClientChunk(pos);
             var future = level.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FULL, true);
             level.getServer().managedBlock(future::isDone);
         }
