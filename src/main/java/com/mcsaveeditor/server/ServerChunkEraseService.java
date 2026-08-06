@@ -12,6 +12,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ChunkMap;
@@ -67,7 +68,8 @@ public final class ServerChunkEraseService {
         }
         if (packet.operation() == ChunkOperation.REGENERATE && !packet.biomeId().isEmpty()) {
             ResourceLocation biomeId = ResourceLocation.tryParse(packet.biomeId());
-            if (biomeId == null || level.registryAccess().lookupOrThrow(Registries.BIOME).get(biomeId).isEmpty()) {
+            if (biomeId == null || level.registryAccess().registryOrThrow(Registries.BIOME)
+                    .getHolder(ResourceKey.create(Registries.BIOME, biomeId)).isEmpty()) {
                 player.sendSystemMessage(Component.literal("MC 存档区块编辑器：未知群系 " + packet.biomeId())
                         .withStyle(ChatFormatting.RED));
                 return;

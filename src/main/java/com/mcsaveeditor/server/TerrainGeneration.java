@@ -3,6 +3,7 @@ package com.mcsaveeditor.server;
 import net.minecraft.Util;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
@@ -71,8 +72,8 @@ final class TerrainGeneration {
         if (id == null) {
             return;
         }
-        Optional<Holder.Reference<Biome>> optional =
-                level.registryAccess().lookupOrThrow(Registries.BIOME).get(id);
+        Optional<Holder.Reference<Biome>> optional = level.registryAccess().registryOrThrow(Registries.BIOME)
+                .getHolder(ResourceKey.create(Registries.BIOME, id));
         if (optional.isEmpty()) {
             return;
         }
