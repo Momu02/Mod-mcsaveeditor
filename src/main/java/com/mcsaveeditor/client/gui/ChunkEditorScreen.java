@@ -1,5 +1,6 @@
 package com.mcsaveeditor.client.gui;
 
+import com.mcsaveeditor.client.EditorPrefs;
 import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.network.packet.CancelScanPacket;
 import com.mcsaveeditor.network.packet.ChunkTimeEntry;
@@ -56,6 +57,25 @@ public class ChunkEditorScreen extends Screen {
     private int dragStartChunkZ;
     private int dragEndChunkX;
     private int dragEndChunkZ;
+    private int biomeIndex;
+    private Button biomeButton;
+
+    /** Biome options for terrain regeneration: id, display name. */
+    private static final String[][] BIOMES = {
+            {"", "原版（世界随机）"},
+            {"minecraft:plains", "平原"},
+            {"minecraft:desert", "沙漠"},
+            {"minecraft:forest", "森林"},
+            {"minecraft:taiga", "针叶林"},
+            {"minecraft:swamp", "沼泽"},
+            {"minecraft:snowy_plains", "雪原"},
+            {"minecraft:savanna", "草原"},
+            {"minecraft:ocean", "海洋"},
+            {"minecraft:mushroom_fields", "蘑菇岛"},
+            {"minecraft:badlands", "恶地"},
+            {"minecraft:jungle", "丛林"},
+            {"minecraft:cherry_grove", "樱花林"}
+    };
 
     public ChunkEditorScreen(int centerChunkX, int centerChunkZ) {
         super(Component.literal("MC 存档区块编辑器"));
@@ -68,18 +88,19 @@ public class ChunkEditorScreen extends Screen {
         int x = 12;
         int y = 42;
 
-        radiusCheckbox = new Checkbox(x, y, 92, 20, Component.literal("限制范围"), false);
+        // ── Restore remembered parameters ───────────────────────────────
+        radiusCheckbox = new Checkbox(x, y, 92, 20, Component.literal("限制范围"), EditorPrefs.limitRadius());
         addRenderableWidget(radiusCheckbox);
 
         radiusBox = new EditBox(font, x + 100, y, 88, 20, Component.literal("区块半径"));
-        radiusBox.setValue("128");
+        radiusBox.setValue(String.valueOf(EditorPrefs.radius()));
         addRenderableWidget(radiusBox);
 
-        minutesCheckbox = new Checkbox(x, y + 26, 92, 20, Component.literal("限制时间"), false);
+        minutesCheckbox = new Checkbox(x, y + 26, 92, 20, Component.literal("限制时间"), EditorPrefs.limitInhabitedTime());
         addRenderableWidget(minutesCheckbox);
 
         minutesBox = new EditBox(font, x + 100, y + 26, 88, 20, Component.literal("最长停留分钟"));
-        minutesBox.setValue("5");
+        minutesBox.setValue(String.valueOf(EditorPrefs.maxMinutes()));
         addRenderableWidget(minutesBox);
 
         addRenderableWidget(Button.builder(Component.literal("扫描区块"), button -> sendScan())
@@ -103,26 +124,53 @@ public class ChunkEditorScreen extends Screen {
                         button -> sendOperation(ChunkOperation.DELETE))
                 .bounds(x + 100, y + 112, 88, 20)
                 .build());
-        randomSeedCheckbox = new Checkbox(x, y + 140, 92, 20, Component.literal("随机种子"), true);
+        randomSeedCheckbox = new Checkbox(x, y + 140, 92, 20, Component.literal("随机种子"), EditorPrefs.randomSeed());
         addRenderableWidget(randomSeedCheckbox);
         seedBox = new EditBox(font, x + 100, y + 140, 88, 20, Component.literal("目标种子"));
-        seedBox.setValue("0");
+        seedBox.setValue(String.valueOf(EditorPrefs.targetSeed()));
         addRenderableWidget(seedBox);
-        addRenderableWidget(new ScanSpeedSlider(x, y + 168, 188, 20));
+        addRenderableWidget(new ScanSpeedSlider(x, y + 168, 188, 20, EditorPrefs.scanSpeed()));
+
+        // ── Biome selector for terrain regeneration ─────────────────────
+        biomeIndex = 0;
+        String rememberedBiome = EditorPrefs.biome();
+        for (int i = 0; i < BIOMES.length; i++) {
+            if (BIOMES[i][0].equals(rememberedBiome)) {
+                biomeIndex = i;
+                break;
+            }
+        }
+        biomeButton = Button.builder(Component.literal(biomeLabel()), button -> {
+            biomeIndex = (biomeIndex + 1) % BIOMES.length;
+            button.setMessage(Component.literal(biomeLabel()));
+        }).bounds(x, y + 196, 188, 20).build();
+        addRenderableWidget(biomeButton);
         addRenderableWidget(Button.builder(Component.literal("关闭"), button -> onClose())
-                .bounds(x, y + 196, 188, 20)
+                .bounds(x, y + 224, 188, 20)
                 .build());
+
+        // ── Restore map view (zoom / pan) ───────────────────────────────
+        cellSize = Math.max(minCellSize(), Math.min(MAX_CELL, EditorPrefs.cellSize()));
+        panChunkX = EditorPrefs.panX();
+        panChunkZ = EditorPrefs.panZ();
+    }
+
+    private String biomeLabel() {
+        return "群系：" + BIOMES[biomeIndex][1];
     }
 
     private static final class ScanSpeedSlider extends AbstractSliderButton {
         private static final int MIN_SPEED = 1;
         private static final int MAX_SPEED = 256;
-        private static final int DEFAULT_SPEED = 32;
         private int lastSent = -1;
 
-        private ScanSpeedSlider(int x, int y, int width, int height) {
+        private ScanSpeedSlider(int x, int y, int width, int height, int initialSpeed) {
             super(x, y, width, height, Component.empty(),
-                    (double) (DEFAULT_SPEED - MIN_SPEED) / (MAX_SPEED - MIN_SPEED));
+                    (double) (clampSpeed(initialSpeed) - MIN_SPEED) / (MAX_SPEED - MIN_SPEED));
+        }
+
+        private static int clampSpeed(int value) {
+            return Math.max(MIN_SPEED, Math.min(MAX_SPEED, value));
         }
 
         private int speed() {
@@ -139,6 +187,7 @@ public class ChunkEditorScreen extends Screen {
             int current = speed();
             if (current != lastSent) {
                 lastSent = current;
+                EditorPrefs.setScanSpeed(current);
                 ModNetworking.CHANNEL.sendToServer(new ScanSpeedPacket(current));
             }
         }
@@ -184,12 +233,12 @@ public class ChunkEditorScreen extends Screen {
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
         graphics.drawString(font, "MC 存档区块编辑器", 12, 14, 0xFFFFFFFF);
         graphics.drawString(font, "筛选条件（勾选后生效）", 12, 28, 0xFFBFC5D2);
-        graphics.drawString(font, "已选择：" + selected.size() + "  扫描：" + scanned.size(), 12, 282, 0xFFFFFFFF);
-        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 296, 0xFFF2C230);
+        graphics.drawString(font, "已选择：" + selected.size() + "  扫描：" + scanned.size(), 12, 310, 0xFFFFFFFF);
+        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 324, 0xFFF2C230);
         graphics.drawString(font, "中心：" + centerChunkX + ", " + centerChunkZ
-                + "  缩放：" + Math.round(cellSize), 12, 310, 0xFFBFC5D2);
+                + "  缩放：" + Math.round(cellSize), 12, 338, 0xFFBFC5D2);
         long viewBlocks = Math.round((width - SIDEBAR_WIDTH) / cellSize * 16.0D);
-        graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 324, 0xFFBFC5D2);
+        graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 352, 0xFFBFC5D2);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -460,6 +509,7 @@ public class ChunkEditorScreen extends Screen {
         int minutes = parseNonNegative(minutesBox.getValue(), 5);
         scanned.clear();
         selected.clear();
+        rememberParameters(radius, minutes);
         ModNetworking.CHANNEL.sendToServer(new ScanRequestPacket(centerChunkX, centerChunkZ,
                 radiusCheckbox.selected(), radius, minutesCheckbox.selected(), minutes));
     }
@@ -471,7 +521,26 @@ public class ChunkEditorScreen extends Screen {
     @Override
     public void onClose() {
         sendCancelScan();
+        rememberParameters(parsePositive(radiusBox.getValue(), 128), parseNonNegative(minutesBox.getValue(), 5));
         super.onClose();
+    }
+
+    /** Persists every editable parameter so it is restored next time. */
+    private void rememberParameters(int radius, int minutes) {
+        EditorPrefs.setLimitRadius(radiusCheckbox.selected());
+        EditorPrefs.setRadius(radius);
+        EditorPrefs.setLimitInhabitedTime(minutesCheckbox.selected());
+        EditorPrefs.setMaxMinutes(minutes);
+        EditorPrefs.setRandomSeed(randomSeedCheckbox.selected());
+        try {
+            EditorPrefs.setTargetSeed(Long.parseLong(seedBox.getValue().trim()));
+        } catch (NumberFormatException ignored) {
+        }
+        EditorPrefs.setBiome(biomeButton != null ? BIOMES[biomeIndex][0] : "");
+        EditorPrefs.setCellSize(cellSize);
+        EditorPrefs.setPanX(panChunkX);
+        EditorPrefs.setPanZ(panChunkZ);
+        EditorPrefs.save();
     }
 
     private void sendOperation(ChunkOperation operation) {
@@ -501,7 +570,8 @@ public class ChunkEditorScreen extends Screen {
             }
         }
         boolean randomSeed = operation == ChunkOperation.REGENERATE && randomSeedCheckbox.selected();
-        ModNetworking.CHANNEL.sendToServer(new DeleteChunksPacket(operation, chunks, randomSeed, seed));
+        ModNetworking.CHANNEL.sendToServer(new DeleteChunksPacket(operation, chunks, randomSeed, seed,
+                BIOMES[biomeIndex][0]));
     }
 
     private int parsePositive(String value, int fallback) {

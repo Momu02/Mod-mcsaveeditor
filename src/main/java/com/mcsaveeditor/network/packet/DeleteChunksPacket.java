@@ -10,7 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-public record DeleteChunksPacket(ChunkOperation operation, List<ChunkPos> chunks, boolean randomSeed, long seed) {
+public record DeleteChunksPacket(ChunkOperation operation, List<ChunkPos> chunks, boolean randomSeed, long seed,
+                                 String biomeId) {
     public static final int MAX_DELETE_COUNT = 4096;
 
     public static void encode(DeleteChunksPacket packet, FriendlyByteBuf buf) {
@@ -18,6 +19,7 @@ public record DeleteChunksPacket(ChunkOperation operation, List<ChunkPos> chunks
         if (packet.operation == ChunkOperation.REGENERATE) {
             buf.writeBoolean(packet.randomSeed);
             buf.writeLong(packet.seed);
+            buf.writeUtf(packet.biomeId, 128);
         }
         int size = Math.min(packet.chunks.size(), MAX_DELETE_COUNT);
         buf.writeVarInt(size);
@@ -32,12 +34,13 @@ public record DeleteChunksPacket(ChunkOperation operation, List<ChunkPos> chunks
         ChunkOperation operation = buf.readEnum(ChunkOperation.class);
         boolean randomSeed = operation == ChunkOperation.REGENERATE && buf.readBoolean();
         long seed = operation == ChunkOperation.REGENERATE ? buf.readLong() : 0L;
+        String biomeId = operation == ChunkOperation.REGENERATE ? buf.readUtf(128) : "";
         int size = Math.min(buf.readVarInt(), MAX_DELETE_COUNT);
         List<ChunkPos> chunks = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             chunks.add(new ChunkPos(buf.readVarInt(), buf.readVarInt()));
         }
-        return new DeleteChunksPacket(operation, chunks, randomSeed, seed);
+        return new DeleteChunksPacket(operation, chunks, randomSeed, seed, biomeId);
     }
 
     public static void handle(DeleteChunksPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {

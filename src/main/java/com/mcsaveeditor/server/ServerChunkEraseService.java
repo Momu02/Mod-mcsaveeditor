@@ -7,10 +7,12 @@ import com.mcsaveeditor.network.packet.ChunkOperation;
 import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
@@ -21,7 +23,6 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
@@ -64,11 +65,19 @@ public final class ServerChunkEraseService {
                     + MAX_REGENERATE_CHUNKS + " 个区块。请分批处理。").withStyle(ChatFormatting.RED));
             return;
         }
+        if (packet.operation() == ChunkOperation.REGENERATE && !packet.biomeId().isEmpty()) {
+            ResourceLocation biomeId = ResourceLocation.tryParse(packet.biomeId());
+            if (biomeId == null || level.registryAccess().lookupOrThrow(Registries.BIOME).getOptional(biomeId).isEmpty()) {
+                player.sendSystemMessage(Component.literal("MC 存档区块编辑器：未知群系 " + packet.biomeId())
+                        .withStyle(ChatFormatting.RED));
+                return;
+            }
+        }
         ServerChunkScanService.cancelScan(player, false);
         long seed = packet.randomSeed() ? new Random().nextLong() : packet.seed();
         EraseJob job;
         try {
-            job = new EraseJob(level, packet.operation(), distinct, seed);
+            job = new EraseJob(level, packet.operation(), distinct, seed, packet.biomeId());
         } catch (RuntimeException exception) {
             LOGGER.error("MC 存档区块编辑器：创建任务失败", exception);
             player.sendSystemMessage(Component.literal("MC 存档区块编辑器：创建任务失败，请检查存档目录权限。")
@@ -129,6 +138,7 @@ public final class ServerChunkEraseService {
         private final RegionFileStorage poiStorage;
         private final RegionFileStorage entityStorage;
         private final long targetSeed;
+        private final String biomeId;
         private final Set<Long> selectedChunks;
         private final int blendBlocks;
         private final int total;
@@ -137,10 +147,10 @@ public final class ServerChunkEraseService {
         private CompoundTag pendingGenCurrent;
         private int processed;
         private int skipped;
-        private int progressMarker;
         private boolean closed;
 
-        private EraseJob(ServerLevel level, ChunkOperation operation, List<ChunkPos> chunks, long targetSeed) {
+        private EraseJob(ServerLevel level, ChunkOperation operation, List<ChunkPos> chunks, long targetSeed,
+                         String biomeId) {
             this.level = level;
             this.operation = operation;
             this.chunkRegionPath = WorldStoragePaths.chunkRegion(level);
@@ -149,6 +159,7 @@ public final class ServerChunkEraseService {
             this.poiStorage = openStorage(poiRegionPath);
             this.entityStorage = openStorage(entityRegionPath);
             this.targetSeed = targetSeed;
+            this.biomeId = biomeId;
             this.selectedChunks = new HashSet<>();
 
             Set<Long> seen = new HashSet<>();
@@ -247,13 +258,12 @@ public final class ServerChunkEraseService {
                         pendingGenPos = pending;
                         pendingGenCurrent = current;
                         pendingGen = CompletableFuture.supplyAsync(
-                                () -> TerrainGeneration.generate(level, pos, seed), Util.backgroundExecutor());
+                                () -> TerrainGeneration.generate(level, pos, seed, biomeId), Util.backgroundExecutor());
                     }
                 }
             }
             if (!completed.isEmpty()) {
                 flushRegeneratedChunks();
-                maybeReportProgress();
                 ModNetworking.CHANNEL.send(PacketDistributor.DIMENSION.with(level::dimension),
                         new DeletedChunksPacket(operation, List.copyOf(completed)));
             }
@@ -261,14 +271,6 @@ public final class ServerChunkEraseService {
 
         private void finishRegenerate(PendingChunk pending, CompoundTag current, ChunkAccess generated) throws IOException {
             ChunkMap chunkMap = level.getChunkSource().chunkMap;
-            if (processed == 1) {
-                int newH = generated.getHeight(Heightmap.Types.WORLD_SURFACE, 0, 0);
-                int oldH = current == null ? -1
-                        : ChunkSerializer.read(level, level.getPoiManager(), pending.pos, current)
-                                .getHeight(Heightmap.Types.WORLD_SURFACE, 0, 0);
-                LOGGER.info("MC 存档区块编辑器：重建验证 {} targetSeed={} blend={} 新表面高度={} 旧表面高度={}",
-                        pending.pos, targetSeed, blendBlocks, newH, oldH);
-            }
             CompoundTag merged;
             if (current == null) {
                 merged = ChunkSerializer.write(level, generated);
@@ -313,16 +315,6 @@ public final class ServerChunkEraseService {
                 LOGGER.error("MC 存档区块编辑器处理区块 {} 失败", pos, exception);
                 return ProcessResult.SKIPPED;
             }
-        }
-
-        private void maybeReportProgress() {
-            int done = processed + skipped;
-            if (done < progressMarker + 8 && done < total) {
-                return;
-            }
-            progressMarker = done;
-            LOGGER.info("MC 存档区块编辑器：地形重建进度 {}/{}（完成 {}，跳过 {}，队列剩余 {}）",
-                    done, total, processed, skipped, queue.size());
         }
 
         private ProcessResult deferOrSkip(PendingChunk pending) {
