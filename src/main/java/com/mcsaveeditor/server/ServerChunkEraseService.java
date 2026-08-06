@@ -66,7 +66,15 @@ public final class ServerChunkEraseService {
         }
         ServerChunkScanService.cancelScan(player, false);
         long seed = packet.randomSeed() ? new Random().nextLong() : packet.seed();
-        EraseJob job = new EraseJob(level, packet.operation(), distinct, seed);
+        EraseJob job;
+        try {
+            job = new EraseJob(level, packet.operation(), distinct, seed);
+        } catch (RuntimeException exception) {
+            LOGGER.error("MC 存档区块编辑器：创建任务失败", exception);
+            player.sendSystemMessage(Component.literal("MC 存档区块编辑器：创建任务失败，请检查存档目录权限。")
+                    .withStyle(ChatFormatting.RED));
+            return;
+        }
         JOBS.add(job);
         String extra = packet.operation() == ChunkOperation.REGENERATE
                 ? " 处理 " + job.total + " 个选中区块（边缘在圈选内高度融合）。目标种子：" + seed
@@ -85,9 +93,17 @@ public final class ServerChunkEraseService {
             return;
         }
 
-        job.tick();
+        try {
+            job.tick();
+        } catch (Exception exception) {
+            JOBS.poll();
+            job.close();
+            LOGGER.error("MC 存档区块编辑器：任务执行异常，已终止", exception);
+            return;
+        }
         if (job.isDone()) {
             JOBS.poll();
+            job.close();
             job.level.getServer().getPlayerList().broadcastSystemMessage(
                     Component.literal("MC 存档区块编辑器：" + operationName(job.operation) + "完成。已处理 "
                             + job.processed + " 个，跳过 " + job.skipped + " 个。"),
@@ -122,6 +138,7 @@ public final class ServerChunkEraseService {
         private int processed;
         private int skipped;
         private int progressMarker;
+        private boolean closed;
 
         private EraseJob(ServerLevel level, ChunkOperation operation, List<ChunkPos> chunks, long targetSeed) {
             this.level = level;
@@ -197,8 +214,12 @@ public final class ServerChunkEraseService {
                         completed.add(pendingGenPos.pos);
                         processed++;
                     } catch (Exception exception) {
-                        skipped++;
                         LOGGER.error("MC 存档区块编辑器处理区块 {} 失败", pendingGenPos.pos, exception);
+                        if (pendingGenPos.retries++ < MAX_RETRIES) {
+                            queue.add(pendingGenPos);
+                        } else {
+                            skipped++;
+                        }
                     }
                     pendingGen = null;
                     pendingGenPos = null;
@@ -211,9 +232,16 @@ public final class ServerChunkEraseService {
                         deferOrSkip(pending);
                     } else {
                         ChunkMap chunkMap = level.getChunkSource().chunkMap;
-                        boolean regionExists = AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos);
-                        CompoundTag current = regionExists
-                                ? chunkMap.read(pending.pos).join().orElse(null) : null;
+                        CompoundTag current = null;
+                        try {
+                            if (AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos)) {
+                                current = chunkMap.read(pending.pos).join().orElse(null);
+                            }
+                        } catch (Exception exception) {
+                            LOGGER.warn("MC 存档区块编辑器读取区块 {} 数据失败，稍后重试", pending.pos, exception);
+                            deferOrSkip(pending);
+                            return;
+                        }
                         ChunkPos pos = pending.pos;
                         long seed = targetSeed;
                         pendingGenPos = pending;
@@ -427,12 +455,16 @@ public final class ServerChunkEraseService {
         }
 
         private boolean isDone() {
-            if (!queue.isEmpty() || pendingGen != null) {
-                return false;
+            return queue.isEmpty() && pendingGen == null;
+        }
+
+        private void close() {
+            if (closed) {
+                return;
             }
+            closed = true;
             flushAndClose(poiStorage);
             flushAndClose(entityStorage);
-            return true;
         }
 
         private static RegionFileStorage openStorage(Path path) {

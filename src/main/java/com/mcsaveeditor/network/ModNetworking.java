@@ -7,6 +7,7 @@ import com.mcsaveeditor.network.packet.DeletedChunksPacket;
 import com.mcsaveeditor.network.packet.OpenEditorPacket;
 import com.mcsaveeditor.network.packet.ScanRequestPacket;
 import com.mcsaveeditor.network.packet.ScanResultPacket;
+import com.mcsaveeditor.network.packet.ScanSpeedPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkRegistry;
@@ -15,7 +16,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 import java.util.Optional;
 
 public final class ModNetworking {
-    private static final String PROTOCOL = "7";
+    private static final String PROTOCOL = "8";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.ChannelBuilder
             .named(new ResourceLocation(MCSaveEditorMod.MOD_ID, "main"))
@@ -35,6 +36,8 @@ public final class ModNetworking {
                 ScanResultPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         CHANNEL.registerMessage(id++, CancelScanPacket.class, CancelScanPacket::encode, CancelScanPacket::decode,
                 CancelScanPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(id++, ScanSpeedPacket.class, ScanSpeedPacket::encode, ScanSpeedPacket::decode,
+                ScanSpeedPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(id++, DeleteChunksPacket.class, DeleteChunksPacket::encode, DeleteChunksPacket::decode,
                 DeleteChunksPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(id++, DeletedChunksPacket.class, DeletedChunksPacket::encode, DeletedChunksPacket::decode,

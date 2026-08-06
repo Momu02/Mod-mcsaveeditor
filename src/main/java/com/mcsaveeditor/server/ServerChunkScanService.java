@@ -4,6 +4,7 @@ import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.network.packet.ChunkTimeEntry;
 import com.mcsaveeditor.network.packet.ScanRequestPacket;
 import com.mcsaveeditor.network.packet.ScanResultPacket;
+import com.mcsaveeditor.network.packet.ScanSpeedPacket;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -27,10 +28,23 @@ import java.util.stream.Stream;
 
 public final class ServerChunkScanService {
     private static final Queue<ScanJob> JOBS = new ArrayDeque<>();
-    private static final int CHUNKS_PER_TICK = 32;
+    private static final int DEFAULT_CHUNKS_PER_TICK = 32;
+    private static final int MIN_CHUNKS_PER_TICK = 1;
+    private static final int MAX_CHUNKS_PER_TICK = 256;
+    private static volatile int chunksPerTick = DEFAULT_CHUNKS_PER_TICK;
     private static final Pattern REGION_FILE = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
 
     private ServerChunkScanService() {
+    }
+
+    public static void handleScanSpeedRequest(ServerPlayer player, ScanSpeedPacket request) {
+        if (!player.hasPermissions(3)) {
+            player.sendSystemMessage(Component.translatable("mcsaveeditor.permission.denied").withStyle(ChatFormatting.RED));
+            return;
+        }
+        int value = Math.max(MIN_CHUNKS_PER_TICK, Math.min(request.chunksPerTick(), MAX_CHUNKS_PER_TICK));
+        chunksPerTick = value;
+        player.sendSystemMessage(Component.literal("MC 存档区块编辑器：扫描速度已调整为 " + value + " 区块/游戏刻"));
     }
 
     public static void handleScanRequest(ServerPlayer player, ScanRequestPacket request) {
@@ -49,9 +63,17 @@ public final class ServerChunkScanService {
             protectedAreas.add(new ProtectedArea(onlinePlayer.chunkPosition(), guardDistance));
         }
 
-        ScanJob job = new ScanJob(player, WorldStoragePaths.chunkRegion(level), request.centerChunkX(),
-                request.centerChunkZ(), request.limitRadius(), radius, request.limitInhabitedTime(),
-                maxInhabitedTicks, protectedAreas);
+        ScanJob job;
+        try {
+            job = new ScanJob(player, WorldStoragePaths.chunkRegion(level), request.centerChunkX(),
+                    request.centerChunkZ(), request.limitRadius(), radius, request.limitInhabitedTime(),
+                    maxInhabitedTicks, protectedAreas);
+        } catch (RuntimeException exception) {
+            LOGGER.error("MC 存档区块编辑器：创建扫描任务失败", exception);
+            player.sendSystemMessage(Component.literal("MC 存档区块编辑器：创建扫描任务失败，请检查存档目录权限。")
+                    .withStyle(ChatFormatting.RED));
+            return;
+        }
         JOBS.removeIf(existing -> {
             if (existing.player == player) {
                 existing.close();
@@ -122,6 +144,7 @@ public final class ServerChunkScanService {
         private int localIndex;
         private int found;
         private boolean finished;
+        private boolean closed;
 
         private ScanJob(ServerPlayer player, Path regionPath, int centerX, int centerZ, boolean limitRadius,
                         int radius, boolean limitInhabitedTime, long maxInhabitedTicks,
@@ -147,9 +170,10 @@ public final class ServerChunkScanService {
                 storage = new RegionFileStorage(regionPath, true);
             }
 
-            List<ChunkTimeEntry> batch = new ArrayList<>(CHUNKS_PER_TICK);
+            List<ChunkTimeEntry> batch = new ArrayList<>(chunksPerTick);
             int processed = 0;
-            while (processed++ < CHUNKS_PER_TICK && !finished) {
+            int limit = chunksPerTick;
+            while (processed++ < limit && !finished) {
                 RegionPos region = regions.get(regionIndex);
                 int x = (region.x() << 5) + (localIndex & 31);
                 int z = (region.z() << 5) + (localIndex >> 5);
@@ -189,6 +213,10 @@ public final class ServerChunkScanService {
         }
 
         private void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
             if (storage != null) {
                 try {
                     storage.close();

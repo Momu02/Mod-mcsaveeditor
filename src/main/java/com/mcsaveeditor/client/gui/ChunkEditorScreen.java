@@ -6,8 +6,11 @@ import com.mcsaveeditor.network.packet.ChunkTimeEntry;
 import com.mcsaveeditor.network.packet.ChunkOperation;
 import com.mcsaveeditor.network.packet.DeleteChunksPacket;
 import com.mcsaveeditor.network.packet.ScanRequestPacket;
+import com.mcsaveeditor.network.packet.ScanSpeedPacket;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
@@ -26,6 +29,7 @@ public class ChunkEditorScreen extends Screen {
     private static final int SIDEBAR_WIDTH = 224;
     private static final int MIN_CELL = 4;
     private static final int MAX_CELL = 48;
+    private static final int MAX_SCANNED_ENTRIES = 200_000;
     private static final int GRID_LINE_COLOR = 0x55303030;
     private static final int AXIS_COLOR = 0xAAE6E6E6;
     private static final int SELECTED_COLOR = 0x66E23535;
@@ -105,13 +109,54 @@ public class ChunkEditorScreen extends Screen {
         seedBox = new EditBox(font, x + 100, y + 140, 88, 20, Component.literal("目标种子"));
         seedBox.setValue("0");
         addRenderableWidget(seedBox);
+        addRenderableWidget(new ScanSpeedSlider(x, y + 168, 188, 20));
         addRenderableWidget(Button.builder(Component.literal("关闭"), button -> onClose())
-                .bounds(x, y + 168, 188, 20)
+                .bounds(x, y + 196, 188, 20)
                 .build());
     }
 
+    private static final class ScanSpeedSlider extends AbstractSliderButton {
+        private static final int MIN_SPEED = 1;
+        private static final int MAX_SPEED = 256;
+        private static final int DEFAULT_SPEED = 32;
+        private int lastSent = -1;
+
+        private ScanSpeedSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, Component.empty(),
+                    (double) (DEFAULT_SPEED - MIN_SPEED) / (MAX_SPEED - MIN_SPEED));
+        }
+
+        private int speed() {
+            return MIN_SPEED + (int) Math.round(this.value * (MAX_SPEED - MIN_SPEED));
+        }
+
+        @Override
+        protected void updateMessage() {
+            this.setMessage(Component.literal("扫描速度：" + speed() + " 区块/刻"));
+        }
+
+        @Override
+        protected void applyValue() {
+            int current = speed();
+            if (current != lastSent) {
+                lastSent = current;
+                ModNetworking.CHANNEL.sendToServer(new ScanSpeedPacket(current));
+            }
+        }
+    }
+
     public void acceptScanResult(List<ChunkTimeEntry> entries) {
+        boolean warned = false;
         for (ChunkTimeEntry entry : entries) {
+            if (scanned.size() >= MAX_SCANNED_ENTRIES) {
+                if (!warned) {
+                    Minecraft.getInstance().player.displayClientMessage(
+                            Component.literal("MC 存档区块编辑器：扫描结果过多，已停止继续接收（上限 "
+                                    + MAX_SCANNED_ENTRIES + "）。请缩小扫描范围。"), false);
+                    warned = true;
+                }
+                return;
+            }
             long key = ChunkPos.asLong(entry.chunkX(), entry.chunkZ());
             scanned.put(key, entry);
         }
@@ -140,10 +185,10 @@ public class ChunkEditorScreen extends Screen {
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
         graphics.drawString(font, "MC 存档区块编辑器", 12, 14, 0xFFFFFFFF);
         graphics.drawString(font, "筛选条件（勾选后生效）", 12, 28, 0xFFBFC5D2);
-        graphics.drawString(font, "已选择：" + selected.size() + "  扫描：" + scanned.size(), 12, 238, 0xFFFFFFFF);
-        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 252, 0xFFF2C230);
+        graphics.drawString(font, "已选择：" + selected.size() + "  扫描：" + scanned.size(), 12, 282, 0xFFFFFFFF);
+        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 296, 0xFFF2C230);
         graphics.drawString(font, "中心：" + centerChunkX + ", " + centerChunkZ
-                + "  缩放：" + Math.round(cellSize), 12, 266, 0xFFBFC5D2);
+                + "  缩放：" + Math.round(cellSize), 12, 310, 0xFFBFC5D2);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -423,6 +468,17 @@ public class ChunkEditorScreen extends Screen {
     }
 
     private void sendOperation(ChunkOperation operation) {
+        if (selected.isEmpty()) {
+            Minecraft.getInstance().player.displayClientMessage(
+                    Component.literal("MC 存档区块编辑器：请先选择区块。"), false);
+            return;
+        }
+        if (selected.size() > DeleteChunksPacket.MAX_DELETE_COUNT) {
+            Minecraft.getInstance().player.displayClientMessage(
+                    Component.literal("MC 存档区块编辑器：选择过多（" + selected.size() + "），单次最多 "
+                            + DeleteChunksPacket.MAX_DELETE_COUNT + " 个，请分批处理。"), false);
+            return;
+        }
         List<ChunkPos> chunks = new ArrayList<>(selected.size());
         for (long key : selected) {
             chunks.add(new ChunkPos((int) key, (int) (key >> 32)));
@@ -431,7 +487,9 @@ public class ChunkEditorScreen extends Screen {
         if (operation == ChunkOperation.REGENERATE && !randomSeedCheckbox.selected()) {
             try {
                 seed = Long.parseLong(seedBox.getValue().trim());
-            } catch (NumberFormatException ignored) {
+            } catch (NumberFormatException exception) {
+                Minecraft.getInstance().player.displayClientMessage(
+                        Component.literal("MC 存档区块编辑器：目标种子格式不正确，请输入整数。"), false);
                 return;
             }
         }
