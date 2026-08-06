@@ -5,6 +5,7 @@ import com.mcsaveeditor.network.packet.ChunkTimeEntry;
 import com.mcsaveeditor.network.packet.ScanRequestPacket;
 import com.mcsaveeditor.network.packet.ScanResultPacket;
 import com.mcsaveeditor.network.packet.ScanSpeedPacket;
+import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -13,6 +14,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
+import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,6 +29,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public final class ServerChunkScanService {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final Queue<ScanJob> JOBS = new ArrayDeque<>();
     private static final int DEFAULT_CHUNKS_PER_TICK = 32;
     private static final int MIN_CHUNKS_PER_TICK = 1;

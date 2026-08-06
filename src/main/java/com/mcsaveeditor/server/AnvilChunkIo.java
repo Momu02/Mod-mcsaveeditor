@@ -5,10 +5,14 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class AnvilChunkIo {
+    private static final Method WRITE_METHOD = findWriteMethod();
+
     private AnvilChunkIo() {
     }
 
@@ -30,7 +34,30 @@ public final class AnvilChunkIo {
     }
 
     static void writeChunk(RegionFileStorage storage, ChunkPos pos, CompoundTag tag) throws IOException {
-        storage.write(pos, tag);
+        try {
+            WRITE_METHOD.invoke(storage, pos, tag);
+        } catch (InvocationTargetException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw new IOException("RegionFileStorage.write failed", cause);
+        } catch (IllegalAccessException | IllegalArgumentException exception) {
+            throw new IOException("Unable to invoke RegionFileStorage.write", exception);
+        }
+    }
+
+    private static Method findWriteMethod() {
+        for (Method method : RegionFileStorage.class.getDeclaredMethods()) {
+            Class<?>[] parameters = method.getParameterTypes();
+            if (parameters.length == 2
+                    && parameters[0] == ChunkPos.class
+                    && parameters[1] == CompoundTag.class) {
+                method.setAccessible(true);
+                return method;
+            }
+        }
+        throw new IllegalStateException("Unable to find RegionFileStorage chunk write method");
     }
 
     private static long readInhabitedTime(CompoundTag tag) {
