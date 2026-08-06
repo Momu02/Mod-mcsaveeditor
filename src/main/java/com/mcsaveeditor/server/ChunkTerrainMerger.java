@@ -52,6 +52,7 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.material.FluidState;
 
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -59,6 +60,7 @@ import java.util.Set;
 
 final class ChunkTerrainMerger {
     private static final int DEEP_BLEND_DEPTH = 24;
+    private static final int BUILDING_HALO_BLOCKS = 4;
     static final int EDGE_BLEND_BLOCKS = 64;
 
     private ChunkTerrainMerger() {
@@ -75,13 +77,15 @@ final class ChunkTerrainMerger {
         BlockPos.MutableBlockPos samplePos = new BlockPos.MutableBlockPos();
 
         boolean deepChunk = isDeepChunk(chunkPos, selectedChunks, blendBlocks);
+        boolean[] buildingColumn = findBuildingColumns(current, chunkPos, minY, maxY);
 
         for (int localX = 0; localX < 16; localX++) {
             for (int localZ = 0; localZ < 16; localZ++) {
                 int blockX = chunkPos.getMinBlockX() + localX;
                 int blockZ = chunkPos.getMinBlockZ() + localZ;
-                double blend = deepChunk ? 1.0D
+                double edge = deepChunk ? 1.0D
                         : edgeBlendFactor(blockX, blockZ, selectedChunks, targetSeed, blendBlocks);
+                double blend = effectiveBlend(edge, buildingColumn, localX, localZ);
                 int oldH = groundSurfaceY(current, blockX, blockZ, minY, maxY);
                 int newH = groundSurfaceY(generatedNew, blockX, blockZ, minY, maxY);
                 int refH = (int) Math.round(lerp(oldH, newH, blend));
@@ -92,6 +96,14 @@ final class ChunkTerrainMerger {
                     BlockState newState = generatedNew.getBlockState(pos);
 
                     if (isArtificialBuildBlock(currentState) && canPreserve(currentState, generatedNew, pos)) {
+                        if (currentState != newState) {
+                            generatedNew.setBlockState(pos, currentState, false);
+                            generatedNew.removeBlockEntity(pos);
+                        }
+                        continue;
+                    }
+
+                    if (currentState.is(BlockTags.LOGS) && blend < 0.999D) {
                         if (currentState != newState) {
                             generatedNew.setBlockState(pos, currentState, false);
                             generatedNew.removeBlockEntity(pos);
@@ -121,8 +133,10 @@ final class ChunkTerrainMerger {
             }
         }
 
-        mergeBiomes(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks);
-        mergeBlockEntities(currentTag, current, generatedNew, selectedChunks, targetSeed, blendBlocks);
+        preserveTreeCanopies(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks, buildingColumn, minY, maxY);
+
+        mergeBiomes(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks, buildingColumn);
+        mergeBlockEntities(currentTag, current, generatedNew, selectedChunks, targetSeed, blendBlocks, buildingColumn);
 
         CompoundTag tag = ChunkSerializer.write(sourceWorld, generatedNew);
         if (currentTag != null) {
@@ -316,6 +330,172 @@ final class ChunkTerrainMerger {
                 && distanceToOutside(blockX + 15, blockZ + 15, selectedChunks, blendBlocks) >= blendBlocks;
     }
 
+    private static boolean[] findBuildingColumns(ChunkAccess current, ChunkPos chunkPos, int minY, int maxY) {
+        boolean[] buildingColumn = new boolean[256];
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                pos.set(chunkPos.getMinBlockX() + localX, 0, chunkPos.getMinBlockZ() + localZ);
+                boolean structural = false;
+                boolean hasLog = false;
+                boolean hasLeaf = false;
+                int logCount = 0;
+                for (int y = minY; y < maxY; y++) {
+                    pos.setY(y);
+                    BlockState state = current.getBlockState(pos);
+                    if (isArtificialBuildBlock(state) && !isFlimsyBuildBlock(state)) {
+                        structural = true;
+                    }
+                    if (state.is(BlockTags.LOGS)) {
+                        hasLog = true;
+                        logCount++;
+                    } else if (state.is(BlockTags.LEAVES)) {
+                        hasLeaf = true;
+                    }
+                }
+                buildingColumn[localX * 16 + localZ] = structural || (hasLog && !hasLeaf && logCount >= 2);
+            }
+        }
+        return buildingColumn;
+    }
+
+    private static boolean isFlimsyBuildBlock(BlockState state) {
+        var block = state.getBlock();
+        return block instanceof TorchBlock
+                || block instanceof ButtonBlock
+                || block instanceof LeverBlock
+                || block instanceof BasePressurePlateBlock
+                || block instanceof CarpetBlock
+                || block instanceof SnowLayerBlock
+                || block instanceof SignBlock
+                || state.is(BlockTags.RAILS)
+                || state.is(BlockTags.BUTTONS)
+                || state.is(BlockTags.WOOL_CARPETS)
+                || state.is(BlockTags.BANNERS);
+    }
+
+    private static double effectiveBlend(double edge, boolean[] buildingColumn, int localX, int localZ) {
+        int index = localX * 16 + localZ;
+        if (buildingColumn[index]) {
+            return 0.0D;
+        }
+        int dist = buildingDistance(buildingColumn, localX, localZ);
+        if (dist >= BUILDING_HALO_BLOCKS) {
+            return edge;
+        }
+        double t = (double) dist / (double) BUILDING_HALO_BLOCKS;
+        return edge * (t * t * (3.0D - 2.0D * t));
+    }
+
+    private static double effectiveBlend(int blockX, int blockZ, Set<Long> selectedChunks, long seed,
+                                         int blendBlocks, boolean[] buildingColumn) {
+        double edge = edgeBlendFactor(blockX, blockZ, selectedChunks, seed, blendBlocks);
+        return effectiveBlend(edge, buildingColumn, blockX & 15, blockZ & 15);
+    }
+
+    private static int buildingDistance(boolean[] buildingColumn, int localX, int localZ) {
+        int minDist = Integer.MAX_VALUE;
+        for (int dx = -BUILDING_HALO_BLOCKS; dx <= BUILDING_HALO_BLOCKS; dx++) {
+            int columnX = localX + dx;
+            if (columnX < 0 || columnX > 15) {
+                continue;
+            }
+            for (int dz = -BUILDING_HALO_BLOCKS; dz <= BUILDING_HALO_BLOCKS; dz++) {
+                int columnZ = localZ + dz;
+                if (columnZ < 0 || columnZ > 15) {
+                    continue;
+                }
+                if (buildingColumn[columnX * 16 + columnZ]) {
+                    int dist = Math.max(Math.abs(dx), Math.abs(dz));
+                    if (dist < minDist) {
+                        minDist = dist;
+                    }
+                }
+            }
+        }
+        return minDist == Integer.MAX_VALUE ? BUILDING_HALO_BLOCKS : minDist;
+    }
+
+    private static void preserveTreeCanopies(ChunkAccess current, ChunkAccess generatedNew, ChunkPos chunkPos,
+                                             Set<Long> selectedChunks, long seed, int blendBlocks,
+                                             boolean[] buildingColumn, int minY, int maxY) {
+        boolean[] canopyZone = new boolean[256];
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                int blockX = chunkPos.getMinBlockX() + localX;
+                int blockZ = chunkPos.getMinBlockZ() + localZ;
+                double edge = edgeBlendFactor(blockX, blockZ, selectedChunks, seed, blendBlocks);
+                canopyZone[localX * 16 + localZ] = effectiveBlend(edge, buildingColumn, localX, localZ) < 0.999D;
+            }
+        }
+
+        Set<Long> visited = new HashSet<>();
+        ArrayDeque<BlockPos.MutableBlockPos> stack = new ArrayDeque<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        int minBlockX = chunkPos.getMinBlockX();
+        int minBlockZ = chunkPos.getMinBlockZ();
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                if (!canopyZone[localX * 16 + localZ]) {
+                    continue;
+                }
+                for (int y = minY; y < maxY; y++) {
+                    pos.set(minBlockX + localX, y, minBlockZ + localZ);
+                    if (!current.getBlockState(pos).is(BlockTags.LOGS)) {
+                        continue;
+                    }
+                    long key = pos.asLong();
+                    if (!visited.add(key)) {
+                        continue;
+                    }
+                    stack.push(new BlockPos.MutableBlockPos().set(pos));
+                    while (!stack.isEmpty()) {
+                        BlockPos.MutableBlockPos node = stack.pop();
+                        BlockState state = current.getBlockState(node);
+                        if (!state.is(BlockTags.LOGS) && !state.is(BlockTags.LEAVES)) {
+                            continue;
+                        }
+                        BlockState newState = generatedNew.getBlockState(node);
+                        if (state != newState) {
+                            generatedNew.setBlockState(node, state, false);
+                            generatedNew.removeBlockEntity(node);
+                        }
+                        int nodeX = node.getX();
+                        int nodeY = node.getY();
+                        int nodeZ = node.getZ();
+                        for (int dx = -1; dx <= 1; dx++) {
+                            for (int dy = -1; dy <= 1; dy++) {
+                                for (int dz = -1; dz <= 1; dz++) {
+                                    if (dx == 0 && dy == 0 && dz == 0) {
+                                        continue;
+                                    }
+                                    int neighborX = nodeX + dx;
+                                    int neighborY = nodeY + dy;
+                                    int neighborZ = nodeZ + dz;
+                                    if (neighborY < minY || neighborY >= maxY) {
+                                        continue;
+                                    }
+                                    if (neighborX < minBlockX || neighborX >= minBlockX + 16
+                                            || neighborZ < minBlockZ || neighborZ >= minBlockZ + 16) {
+                                        continue;
+                                    }
+                                    if (!canopyZone[(neighborX & 15) * 16 + (neighborZ & 15)]) {
+                                        continue;
+                                    }
+                                    BlockPos.MutableBlockPos neighbor = new BlockPos.MutableBlockPos(
+                                            neighborX, neighborY, neighborZ);
+                                    if (visited.add(neighbor.asLong())) {
+                                        stack.push(neighbor);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private static int distanceToOutside(int blockX, int blockZ, Set<Long> selectedChunks, int maxDist) {
         int min = maxDist;
         for (int dx = -maxDist; dx <= maxDist; dx++) {
@@ -434,7 +614,8 @@ final class ChunkTerrainMerger {
 
     @SuppressWarnings("unchecked")
     private static void mergeBiomes(ChunkAccess current, ChunkAccess generatedNew,
-                                    ChunkPos chunkPos, Set<Long> selectedChunks, long seed, int blendBlocks) {
+                                    ChunkPos chunkPos, Set<Long> selectedChunks, long seed, int blendBlocks,
+                                    boolean[] buildingColumn) {
         LevelChunkSection[] oldSections = current.getSections();
         LevelChunkSection[] newSections = generatedNew.getSections();
         for (int sectionIndex = 0; sectionIndex < Math.min(oldSections.length, newSections.length); sectionIndex++) {
@@ -447,7 +628,7 @@ final class ChunkTerrainMerger {
                 for (int quartZ = 0; quartZ < 4; quartZ++) {
                     int blockX = chunkPos.getMinBlockX() + quartX * 4 + 2;
                     int blockZ = chunkPos.getMinBlockZ() + quartZ * 4 + 2;
-                    boolean useOld = edgeBlendFactor(blockX, blockZ, selectedChunks, seed, blendBlocks) < 0.5D
+                    boolean useOld = effectiveBlend(blockX, blockZ, selectedChunks, seed, blendBlocks, buildingColumn) < 0.5D
                             && sectionIndex < oldSections.length && oldSections[sectionIndex] != null;
                     for (int quartY = 0; quartY < 4; quartY++) {
                         Holder<Biome> biome = useOld
@@ -534,7 +715,8 @@ final class ChunkTerrainMerger {
     }
 
     private static void mergeBlockEntities(CompoundTag currentTag, ChunkAccess current, ChunkAccess generatedNew,
-                                           Set<Long> selectedChunks, long seed, int blendBlocks) {
+                                           Set<Long> selectedChunks, long seed, int blendBlocks,
+                                           boolean[] buildingColumn) {
         Map<BlockPos, CompoundTag> currentBes = readBlockEntities(currentTag);
 
         for (BlockPos placePos : new HashSet<>(getBlockEntityMap(generatedNew).keySet())) {
@@ -558,7 +740,7 @@ final class ChunkTerrainMerger {
             if (getBlockEntityMap(generatedNew).containsKey(pos)) {
                 continue;
             }
-            if (edgeBlendFactor(pos.getX(), pos.getZ(), selectedChunks, seed, blendBlocks) < 0.5D) {
+            if (effectiveBlend(pos.getX(), pos.getZ(), selectedChunks, seed, blendBlocks, buildingColumn) < 0.5D) {
                 continue;
             }
             BlockState state = generatedNew.getBlockState(pos);
