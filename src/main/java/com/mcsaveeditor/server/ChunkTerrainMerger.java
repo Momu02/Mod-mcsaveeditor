@@ -74,11 +74,14 @@ final class ChunkTerrainMerger {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos samplePos = new BlockPos.MutableBlockPos();
 
+        boolean deepChunk = isDeepChunk(chunkPos, selectedChunks, blendBlocks);
+
         for (int localX = 0; localX < 16; localX++) {
             for (int localZ = 0; localZ < 16; localZ++) {
                 int blockX = chunkPos.getMinBlockX() + localX;
                 int blockZ = chunkPos.getMinBlockZ() + localZ;
-                double blend = edgeBlendFactor(blockX, blockZ, selectedChunks, targetSeed, blendBlocks);
+                double blend = deepChunk ? 1.0D
+                        : edgeBlendFactor(blockX, blockZ, selectedChunks, targetSeed, blendBlocks);
                 int oldH = groundSurfaceY(current, blockX, blockZ, minY, maxY);
                 int newH = groundSurfaceY(generatedNew, blockX, blockZ, minY, maxY);
                 int refH = (int) Math.round(lerp(oldH, newH, blend));
@@ -304,6 +307,15 @@ final class ChunkTerrainMerger {
         return linear * linear * (3.0D - 2.0D * linear);
     }
 
+    private static boolean isDeepChunk(ChunkPos chunkPos, Set<Long> selectedChunks, int blendBlocks) {
+        int blockX = chunkPos.getMinBlockX();
+        int blockZ = chunkPos.getMinBlockZ();
+        return distanceToOutside(blockX, blockZ, selectedChunks, blendBlocks) >= blendBlocks
+                && distanceToOutside(blockX + 15, blockZ, selectedChunks, blendBlocks) >= blendBlocks
+                && distanceToOutside(blockX, blockZ + 15, selectedChunks, blendBlocks) >= blendBlocks
+                && distanceToOutside(blockX + 15, blockZ + 15, selectedChunks, blendBlocks) >= blendBlocks;
+    }
+
     private static int distanceToOutside(int blockX, int blockZ, Set<Long> selectedChunks, int maxDist) {
         int min = maxDist;
         for (int dx = -maxDist; dx <= maxDist; dx++) {
@@ -330,21 +342,26 @@ final class ChunkTerrainMerger {
                                               int refH, int oldH, int newH,
                                               double blend, long seed, int minY, int maxY) {
         int depth = refH - y;
-        if (y > oldH && y > newH) {
-            return Blocks.AIR.defaultBlockState();
-        }
         if (depth < 0) {
             samplePos.set(x, y, z);
             BlockState oldAbs = oldTerrain.getBlockState(samplePos);
             BlockState newAbs = newTerrain.getBlockState(samplePos);
-            if (isFluid(oldAbs) || isFluid(newAbs)) {
-                return blend >= 0.5D ? newAbs : oldAbs;
-            }
-            if (!oldAbs.isAir() && newAbs.isAir()) {
-                return oldAbs;
-            }
-            if (oldAbs.isAir() && !newAbs.isAir()) {
-                return newAbs;
+            boolean oldFluid = isFluid(oldAbs);
+            boolean newFluid = isFluid(newAbs);
+            if (blend >= 0.5D) {
+                if (newFluid) {
+                    return newAbs;
+                }
+                if (oldFluid) {
+                    return oldAbs;
+                }
+            } else {
+                if (oldFluid) {
+                    return oldAbs;
+                }
+                if (newFluid) {
+                    return newAbs;
+                }
             }
             return Blocks.AIR.defaultBlockState();
         }
@@ -420,7 +437,7 @@ final class ChunkTerrainMerger {
                                     ChunkPos chunkPos, Set<Long> selectedChunks, long seed, int blendBlocks) {
         LevelChunkSection[] oldSections = current.getSections();
         LevelChunkSection[] newSections = generatedNew.getSections();
-        for (int sectionIndex = 0; sectionIndex < Math.min(newSections.length, newSections.length); sectionIndex++) {
+        for (int sectionIndex = 0; sectionIndex < Math.min(oldSections.length, newSections.length); sectionIndex++) {
             if (newSections[sectionIndex] == null) {
                 continue;
             }

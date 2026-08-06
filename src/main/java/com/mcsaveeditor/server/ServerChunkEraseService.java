@@ -254,8 +254,6 @@ public final class ServerChunkEraseService {
             }
             ChunkPos pos = pending.pos;
             forgetClientChunk(pos);
-            var future = level.getChunkSource().getChunkFuture(pos.x, pos.z, ChunkStatus.FULL, true);
-            level.getServer().managedBlock(future::isDone);
         }
 
         private ProcessResult process(PendingChunk pending) {
