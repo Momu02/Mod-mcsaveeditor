@@ -27,7 +27,6 @@ import java.util.Set;
 
 public class ChunkEditorScreen extends Screen {
     private static final int SIDEBAR_WIDTH = 224;
-    private static final int MIN_CELL = 4;
     private static final int MAX_CELL = 48;
     private static final int MAX_SCANNED_ENTRIES = 200_000;
     private static final int GRID_LINE_COLOR = 0x55303030;
@@ -189,6 +188,8 @@ public class ChunkEditorScreen extends Screen {
         graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 296, 0xFFF2C230);
         graphics.drawString(font, "中心：" + centerChunkX + ", " + centerChunkZ
                 + "  缩放：" + Math.round(cellSize), 12, 310, 0xFFBFC5D2);
+        long viewBlocks = Math.round((width - SIDEBAR_WIDTH) / cellSize * 16.0D);
+        graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 324, 0xFFBFC5D2);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -419,12 +420,18 @@ public class ChunkEditorScreen extends Screen {
         }
         double beforeX = screenToWorldChunkX(mouseX);
         double beforeZ = screenToWorldChunkZ(mouseY);
-        cellSize = Math.max(MIN_CELL, Math.min(MAX_CELL, cellSize + delta * 2.0D));
+        cellSize = Math.max(minCellSize(), Math.min(MAX_CELL, cellSize + delta * 2.0D));
         double afterX = screenToWorldChunkX(mouseX);
         double afterZ = screenToWorldChunkZ(mouseY);
         panChunkX += beforeX - afterX;
         panChunkZ += beforeZ - afterZ;
         return true;
+    }
+
+    /** Smallest zoom-out: the viewport spans ~10,000 blocks (625 chunks) across. */
+    private int minCellSize() {
+        int mapWidthPx = Math.max(1, width - SIDEBAR_WIDTH);
+        return Math.max(1, (int) Math.floor(mapWidthPx / 625.0D));
     }
 
     private void applySelection(boolean add) {
