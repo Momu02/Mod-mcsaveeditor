@@ -81,6 +81,7 @@ final class ChunkTerrainMerger {
                 double blend = edgeBlendFactor(blockX, blockZ, selectedChunks, targetSeed, blendBlocks);
                 int oldH = groundSurfaceY(current, blockX, blockZ, minY, maxY);
                 int newH = groundSurfaceY(generatedNew, blockX, blockZ, minY, maxY);
+                int refH = (int) Math.round(lerp(oldH, newH, blend));
 
                 for (int y = minY; y < maxY; y++) {
                     pos.set(blockX, y, blockZ);
@@ -108,7 +109,7 @@ final class ChunkTerrainMerger {
 
                     BlockState blended = blendBlockState(
                             current, generatedNew, samplePos, blockX, y, blockZ,
-                            oldH, newH, blend, targetSeed, minY, maxY);
+                            refH, oldH, newH, blend, targetSeed, minY, maxY);
                     if (blended != newState) {
                         generatedNew.setBlockState(pos, blended, false);
                         generatedNew.removeBlockEntity(pos);
@@ -326,29 +327,24 @@ final class ChunkTerrainMerger {
     private static BlockState blendBlockState(ChunkAccess oldTerrain, ChunkAccess newTerrain,
                                               BlockPos.MutableBlockPos samplePos,
                                               int x, int y, int z,
-                                              int oldH, int newH,
+                                              int refH, int oldH, int newH,
                                               double blend, long seed, int minY, int maxY) {
-        int depth = oldH - y;
+        int depth = refH - y;
+        if (y > oldH && y > newH) {
+            return Blocks.AIR.defaultBlockState();
+        }
         if (depth < 0) {
             samplePos.set(x, y, z);
             BlockState oldAbs = oldTerrain.getBlockState(samplePos);
             BlockState newAbs = newTerrain.getBlockState(samplePos);
-            boolean oldFluid = isFluid(oldAbs);
-            boolean newFluid = isFluid(newAbs);
-            if (blend >= 0.5D) {
-                if (newFluid) {
-                    return newAbs;
-                }
-                if (oldFluid) {
-                    return oldAbs;
-                }
-            } else {
-                if (oldFluid) {
-                    return oldAbs;
-                }
-                if (newFluid) {
-                    return newAbs;
-                }
+            if (isFluid(oldAbs) || isFluid(newAbs)) {
+                return blend >= 0.5D ? newAbs : oldAbs;
+            }
+            if (!oldAbs.isAir() && newAbs.isAir()) {
+                return oldAbs;
+            }
+            if (oldAbs.isAir() && !newAbs.isAir()) {
+                return newAbs;
             }
             return Blocks.AIR.defaultBlockState();
         }
