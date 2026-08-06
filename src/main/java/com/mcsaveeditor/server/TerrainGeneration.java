@@ -72,7 +72,7 @@ final class TerrainGeneration {
             return;
         }
         Optional<Holder.Reference<Biome>> optional =
-                level.registryAccess().lookupOrThrow(Registries.BIOME).getOptional(id);
+                level.registryAccess().lookupOrThrow(Registries.BIOME).get(id);
         if (optional.isEmpty()) {
             return;
         }

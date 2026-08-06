@@ -67,7 +67,7 @@ public final class ServerChunkEraseService {
         }
         if (packet.operation() == ChunkOperation.REGENERATE && !packet.biomeId().isEmpty()) {
             ResourceLocation biomeId = ResourceLocation.tryParse(packet.biomeId());
-            if (biomeId == null || level.registryAccess().lookupOrThrow(Registries.BIOME).getOptional(biomeId).isEmpty()) {
+            if (biomeId == null || level.registryAccess().lookupOrThrow(Registries.BIOME).get(biomeId).isEmpty()) {
                 player.sendSystemMessage(Component.literal("MC 存档区块编辑器：未知群系 " + packet.biomeId())
                         .withStyle(ChatFormatting.RED));
                 return;
