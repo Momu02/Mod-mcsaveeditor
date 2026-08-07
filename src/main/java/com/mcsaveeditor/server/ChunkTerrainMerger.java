@@ -9,35 +9,16 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.BaseEntityBlock;
-import net.minecraft.world.level.block.BasePressurePlateBlock;
-import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.BushBlock;
-import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.CactusBlock;
 import net.minecraft.world.level.block.CarpetBlock;
-import net.minecraft.world.level.block.ChainBlock;
 import net.minecraft.world.level.block.ChorusFlowerBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.DoublePlantBlock;
-import net.minecraft.world.level.block.FenceBlock;
-import net.minecraft.world.level.block.FenceGateBlock;
-import net.minecraft.world.level.block.GlassBlock;
-import net.minecraft.world.level.block.IronBarsBlock;
-import net.minecraft.world.level.block.LadderBlock;
-import net.minecraft.world.level.block.LanternBlock;
-import net.minecraft.world.level.block.LeverBlock;
-import net.minecraft.world.level.block.SignBlock;
-import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.SnowLayerBlock;
-import net.minecraft.world.level.block.StairBlock;
-import net.minecraft.world.level.block.StainedGlassBlock;
-import net.minecraft.world.level.block.StainedGlassPaneBlock;
 import net.minecraft.world.level.block.SugarCaneBlock;
 import net.minecraft.world.level.block.TorchBlock;
-import net.minecraft.world.level.block.TrapDoorBlock;
-import net.minecraft.world.level.block.WallBlock;
 import net.minecraft.world.level.block.WallTorchBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -62,12 +43,16 @@ final class ChunkTerrainMerger {
     private static final int DEEP_BLEND_DEPTH = 24;
     private static final int BUILDING_HALO_BLOCKS = 4;
     static final int EDGE_BLEND_BLOCKS = 64;
+    private static final int[][] SIX_NEIGHBORS = {
+            {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+    };
 
     private ChunkTerrainMerger() {
     }
 
     static CompoundTag merge(ServerLevel sourceWorld, ChunkAccess generatedNew, ChunkPos chunkPos,
-                             CompoundTag currentTag, Set<Long> selectedChunks, long targetSeed, int blendBlocks) {
+                             CompoundTag currentTag, Set<Long> selectedChunks, long targetSeed, int blendBlocks,
+                             ProtectionConfig config) {
         ChunkAccess current = ChunkSerializer.read(
                 sourceWorld, sourceWorld.getPoiManager(), chunkPos, currentTag);
 
@@ -77,7 +62,7 @@ final class ChunkTerrainMerger {
         BlockPos.MutableBlockPos samplePos = new BlockPos.MutableBlockPos();
 
         boolean deepChunk = isDeepChunk(chunkPos, selectedChunks, blendBlocks);
-        boolean[] buildingColumn = findBuildingColumns(current, chunkPos, minY, maxY);
+        boolean[] buildingColumn = findBuildingColumns(current, chunkPos, minY, maxY, config);
 
         for (int localX = 0; localX < 16; localX++) {
             for (int localZ = 0; localZ < 16; localZ++) {
@@ -86,8 +71,8 @@ final class ChunkTerrainMerger {
                 double edge = deepChunk ? 1.0D
                         : edgeBlendFactor(blockX, blockZ, selectedChunks, targetSeed, blendBlocks);
                 double blend = effectiveBlend(edge, buildingColumn, localX, localZ);
-                int oldH = groundSurfaceY(current, blockX, blockZ, minY, maxY);
-                int newH = groundSurfaceY(generatedNew, blockX, blockZ, minY, maxY);
+                int oldH = groundSurfaceY(current, blockX, blockZ, minY, maxY, config);
+                int newH = groundSurfaceY(generatedNew, blockX, blockZ, minY, maxY, config);
                 int refH = (int) Math.round(lerp(oldH, newH, blend));
 
                 for (int y = minY; y < maxY; y++) {
@@ -95,7 +80,7 @@ final class ChunkTerrainMerger {
                     BlockState currentState = current.getBlockState(pos);
                     BlockState newState = generatedNew.getBlockState(pos);
 
-                    if (isArtificialBuildBlock(currentState) && canPreserve(currentState, generatedNew, pos)) {
+                    if (isProtectedBlock(currentState, config) && canPreserve(currentState, generatedNew, pos)) {
                         if (currentState != newState) {
                             generatedNew.setBlockState(pos, currentState, false);
                             generatedNew.removeBlockEntity(pos);
@@ -103,7 +88,7 @@ final class ChunkTerrainMerger {
                         continue;
                     }
 
-                    if (currentState.is(BlockTags.LOGS) && blend < 0.999D) {
+                    if (!config.isExcluded(currentState) && isPlayerWood(currentState) && blend < 0.999D) {
                         if (currentState != newState) {
                             generatedNew.setBlockState(pos, currentState, false);
                             generatedNew.removeBlockEntity(pos);
@@ -133,10 +118,10 @@ final class ChunkTerrainMerger {
             }
         }
 
-        preserveTreeCanopies(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks, buildingColumn, minY, maxY);
+        preserveTreeCanopies(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks, buildingColumn, minY, maxY, config);
 
-        mergeBiomes(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks, buildingColumn);
-        mergeBlockEntities(currentTag, current, generatedNew, selectedChunks, targetSeed, blendBlocks, buildingColumn);
+        mergeBiomes(current, generatedNew, chunkPos, selectedChunks, targetSeed, blendBlocks, buildingColumn, config);
+        mergeBlockEntities(currentTag, current, generatedNew, selectedChunks, targetSeed, blendBlocks, buildingColumn, config);
 
         CompoundTag tag = ChunkSerializer.write(sourceWorld, generatedNew);
         if (currentTag != null) {
@@ -149,167 +134,20 @@ final class ChunkTerrainMerger {
         return tag;
     }
 
-    private static boolean isArtificialBuildBlock(BlockState state) {
-        if (state.isAir() || isFluid(state) || isNaturalTerrainBlock(state)) {
+    private static boolean isProtectedBlock(BlockState state, ProtectionConfig config) {
+        if (state.isAir() || isFluid(state) || config.isExcluded(state)) {
             return false;
         }
-        var block = state.getBlock();
-        if (block instanceof StairBlock
-                || block instanceof SlabBlock
-                || block instanceof WallBlock
-                || block instanceof FenceBlock
-                || block instanceof FenceGateBlock
-                || block instanceof DoorBlock
-                || block instanceof TrapDoorBlock
-                || block instanceof BedBlock
-                || block instanceof GlassBlock
-                || block instanceof StainedGlassBlock
-                || block instanceof StainedGlassPaneBlock
-                || block instanceof IronBarsBlock
-                || block instanceof LadderBlock
-                || block instanceof LanternBlock
-                || block instanceof ChainBlock
-                || block instanceof SignBlock
-                || block instanceof LeverBlock
-                || block instanceof ButtonBlock
-                || block instanceof BasePressurePlateBlock
-                || block instanceof TorchBlock
-                || block instanceof CarpetBlock
-                || block instanceof BaseEntityBlock) {
-            return true;
+        for (ProtectionCategories.Category category : ProtectionCategories.CATEGORIES) {
+            if (config.isEnabled(category) && ProtectionCategories.isInCategory(state, category)) {
+                return true;
+            }
         }
-        if (state.is(BlockTags.PLANKS)
-                || state.is(BlockTags.WOOL)
-                || state.is(BlockTags.WOOL_CARPETS)
-                || state.is(BlockTags.BEDS)
-                || state.is(BlockTags.FENCE_GATES)
-                || state.is(BlockTags.DOORS)
-                || state.is(BlockTags.TRAPDOORS)
-                || state.is(BlockTags.BUTTONS)
-                || state.is(BlockTags.RAILS)
-                || state.is(BlockTags.ANVIL)
-                || state.is(BlockTags.BANNERS)) {
-            return true;
-        }
-        return state.is(Blocks.COBBLESTONE)
-                || state.is(Blocks.MOSSY_COBBLESTONE)
-                || state.is(Blocks.STONE_BRICKS)
-                || state.is(Blocks.MOSSY_STONE_BRICKS)
-                || state.is(Blocks.CRACKED_STONE_BRICKS)
-                || state.is(Blocks.CHISELED_STONE_BRICKS)
-                || state.is(Blocks.SMOOTH_STONE)
-                || state.is(Blocks.BRICKS)
-                || state.is(Blocks.BOOKSHELF)
-                || state.is(Blocks.CRAFTING_TABLE)
-                || state.is(Blocks.FURNACE)
-                || state.is(Blocks.BLAST_FURNACE)
-                || state.is(Blocks.SMOKER)
-                || state.is(Blocks.CHEST)
-                || state.is(Blocks.TRAPPED_CHEST)
-                || state.is(Blocks.BARREL)
-                || state.is(Blocks.ENDER_CHEST)
-                || state.is(Blocks.ENCHANTING_TABLE)
-                || state.is(Blocks.IRON_BLOCK)
-                || state.is(Blocks.GOLD_BLOCK)
-                || state.is(Blocks.DIAMOND_BLOCK)
-                || state.is(Blocks.EMERALD_BLOCK)
-                || state.is(Blocks.NETHERITE_BLOCK)
-                || state.is(Blocks.COPPER_BLOCK)
-                || state.is(Blocks.CUT_COPPER)
-                || state.is(Blocks.GLASS)
-                || state.is(Blocks.TINTED_GLASS)
-                || state.is(Blocks.DIRT_PATH)
-                || state.is(Blocks.FARMLAND)
-                || state.is(Blocks.HAY_BLOCK)
-                || isConcrete(state)
-                || isGlazedTerracotta(state)
-                || isPolishedStonework(state);
+        return ProtectionCategories.isCoreBuildBlock(state);
     }
 
-    private static boolean isNaturalTerrainBlock(BlockState state) {
-        if (state.isAir() || isFluid(state)) {
-            return true;
-        }
-        if (state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER)) {
-            return true;
-        }
-        if (state.is(BlockTags.DIRT) || state.is(BlockTags.SAND) || state.is(BlockTags.LEAVES)
-                || state.is(BlockTags.FLOWERS)) {
-            return true;
-        }
-        if (state.is(BlockTags.COAL_ORES) || state.is(BlockTags.IRON_ORES) || state.is(BlockTags.COPPER_ORES)
-                || state.is(BlockTags.GOLD_ORES) || state.is(BlockTags.REDSTONE_ORES)
-                || state.is(BlockTags.EMERALD_ORES) || state.is(BlockTags.LAPIS_ORES)
-                || state.is(BlockTags.DIAMOND_ORES)) {
-            return true;
-        }
-        return state.is(Blocks.GRAVEL)
-                || state.is(Blocks.CLAY)
-                || state.is(Blocks.CALCITE)
-                || state.is(Blocks.TUFF)
-                || state.is(Blocks.DRIPSTONE_BLOCK)
-                || state.is(Blocks.POINTED_DRIPSTONE)
-                || state.is(Blocks.SMOOTH_BASALT)
-                || state.is(Blocks.AMETHYST_BLOCK)
-                || state.is(Blocks.BUDDING_AMETHYST)
-                || state.is(Blocks.MAGMA_BLOCK)
-                || state.is(Blocks.BEDROCK)
-                || state.is(Blocks.NETHERRACK)
-                || state.is(Blocks.END_STONE)
-                || state.is(Blocks.SOUL_SAND)
-                || state.is(Blocks.SOUL_SOIL)
-                || state.is(Blocks.GLOWSTONE)
-                || state.is(Blocks.BLACKSTONE)
-                || state.is(Blocks.BASALT)
-                || state.is(Blocks.SNOW)
-                || state.is(Blocks.SNOW_BLOCK)
-                || state.is(Blocks.POWDER_SNOW)
-                || state.is(Blocks.ICE)
-                || state.is(Blocks.PACKED_ICE)
-                || state.is(Blocks.BLUE_ICE)
-                || state.is(Blocks.MOSS_BLOCK)
-                || state.is(Blocks.MOSS_CARPET)
-                || state.is(Blocks.SCULK)
-                || state.is(Blocks.SCULK_VEIN)
-                || state.getBlock() instanceof BushBlock;
-    }
-
-    private static boolean isConcrete(BlockState state) {
-        return state.is(Blocks.WHITE_CONCRETE) || state.is(Blocks.ORANGE_CONCRETE)
-                || state.is(Blocks.MAGENTA_CONCRETE) || state.is(Blocks.LIGHT_BLUE_CONCRETE)
-                || state.is(Blocks.YELLOW_CONCRETE) || state.is(Blocks.LIME_CONCRETE)
-                || state.is(Blocks.PINK_CONCRETE) || state.is(Blocks.GRAY_CONCRETE)
-                || state.is(Blocks.LIGHT_GRAY_CONCRETE) || state.is(Blocks.CYAN_CONCRETE)
-                || state.is(Blocks.PURPLE_CONCRETE) || state.is(Blocks.BLUE_CONCRETE)
-                || state.is(Blocks.BROWN_CONCRETE) || state.is(Blocks.GREEN_CONCRETE)
-                || state.is(Blocks.RED_CONCRETE) || state.is(Blocks.BLACK_CONCRETE);
-    }
-
-    private static boolean isGlazedTerracotta(BlockState state) {
-        return state.is(Blocks.WHITE_GLAZED_TERRACOTTA) || state.is(Blocks.ORANGE_GLAZED_TERRACOTTA)
-                || state.is(Blocks.MAGENTA_GLAZED_TERRACOTTA) || state.is(Blocks.LIGHT_BLUE_GLAZED_TERRACOTTA)
-                || state.is(Blocks.YELLOW_GLAZED_TERRACOTTA) || state.is(Blocks.LIME_GLAZED_TERRACOTTA)
-                || state.is(Blocks.PINK_GLAZED_TERRACOTTA) || state.is(Blocks.GRAY_GLAZED_TERRACOTTA)
-                || state.is(Blocks.LIGHT_GRAY_GLAZED_TERRACOTTA) || state.is(Blocks.CYAN_GLAZED_TERRACOTTA)
-                || state.is(Blocks.PURPLE_GLAZED_TERRACOTTA) || state.is(Blocks.BLUE_GLAZED_TERRACOTTA)
-                || state.is(Blocks.BROWN_GLAZED_TERRACOTTA) || state.is(Blocks.GREEN_GLAZED_TERRACOTTA)
-                || state.is(Blocks.RED_GLAZED_TERRACOTTA) || state.is(Blocks.BLACK_GLAZED_TERRACOTTA);
-    }
-
-    private static boolean isPolishedStonework(BlockState state) {
-        return state.is(Blocks.POLISHED_ANDESITE) || state.is(Blocks.POLISHED_DIORITE)
-                || state.is(Blocks.POLISHED_GRANITE) || state.is(Blocks.POLISHED_DEEPSLATE)
-                || state.is(Blocks.POLISHED_BLACKSTONE) || state.is(Blocks.POLISHED_BLACKSTONE_BRICKS)
-                || state.is(Blocks.POLISHED_BASALT) || state.is(Blocks.CUT_SANDSTONE)
-                || state.is(Blocks.CUT_RED_SANDSTONE) || state.is(Blocks.QUARTZ_BLOCK)
-                || state.is(Blocks.QUARTZ_BRICKS) || state.is(Blocks.QUARTZ_PILLAR)
-                || state.is(Blocks.PURPUR_BLOCK) || state.is(Blocks.PURPUR_PILLAR)
-                || state.is(Blocks.PRISMARINE_BRICKS) || state.is(Blocks.DARK_PRISMARINE)
-                || state.is(Blocks.SEA_LANTERN) || state.is(Blocks.DEEPSLATE_BRICKS)
-                || state.is(Blocks.DEEPSLATE_TILES) || state.is(Blocks.MUD_BRICKS)
-                || state.is(Blocks.NETHER_BRICKS) || state.is(Blocks.RED_NETHER_BRICKS)
-                || state.is(Blocks.SMOOTH_SANDSTONE) || state.is(Blocks.SMOOTH_RED_SANDSTONE)
-                || state.is(Blocks.SMOOTH_QUARTZ);
+    private static boolean isPlayerWood(BlockState state) {
+        return state.is(BlockTags.LOGS) && !state.is(BlockTags.OVERWORLD_NATURAL_LOGS);
     }
 
     private static double edgeBlendFactor(int blockX, int blockZ, Set<Long> selectedChunks, long seed, int blendBlocks) {
@@ -330,7 +168,8 @@ final class ChunkTerrainMerger {
                 && distanceToOutside(blockX + 15, blockZ + 15, selectedChunks, blendBlocks) >= blendBlocks;
     }
 
-    private static boolean[] findBuildingColumns(ChunkAccess current, ChunkPos chunkPos, int minY, int maxY) {
+    private static boolean[] findBuildingColumns(ChunkAccess current, ChunkPos chunkPos, int minY, int maxY,
+                                                 ProtectionConfig config) {
         boolean[] buildingColumn = new boolean[256];
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int localX = 0; localX < 16; localX++) {
@@ -343,7 +182,7 @@ final class ChunkTerrainMerger {
                 for (int y = minY; y < maxY; y++) {
                     pos.setY(y);
                     BlockState state = current.getBlockState(pos);
-                    if (isArtificialBuildBlock(state) && !isFlimsyBuildBlock(state)) {
+                    if (isProtectedBlock(state, config) && !ProtectionCategories.isFlimsyBuildBlock(state)) {
                         structural = true;
                     }
                     if (state.is(BlockTags.LOGS)) {
@@ -356,22 +195,69 @@ final class ChunkTerrainMerger {
                 buildingColumn[localX * 16 + localZ] = structural || (hasLog && !hasLeaf && logCount >= 2);
             }
         }
+        caveBuildingColumns(current, chunkPos, minY, maxY, config, buildingColumn);
         return buildingColumn;
     }
 
-    private static boolean isFlimsyBuildBlock(BlockState state) {
-        var block = state.getBlock();
-        return block instanceof TorchBlock
-                || block instanceof ButtonBlock
-                || block instanceof LeverBlock
-                || block instanceof BasePressurePlateBlock
-                || block instanceof CarpetBlock
-                || block instanceof SnowLayerBlock
-                || block instanceof SignBlock
-                || state.is(BlockTags.RAILS)
-                || state.is(BlockTags.BUTTONS)
-                || state.is(BlockTags.WOOL_CARPETS)
-                || state.is(BlockTags.BANNERS);
+    /**
+     * Marks whole columns as preserved when protected blocks form an
+     * underground connected domain of at least two blocks (a cave dwelling):
+     * the surrounding stone walls and the terrain above are kept intact so the
+     * rebuilt terrain does not carve into the cave.
+     */
+    private static void caveBuildingColumns(ChunkAccess current, ChunkPos chunkPos, int minY, int maxY,
+                                            ProtectionConfig config, boolean[] buildingColumn) {
+        int minBlockX = chunkPos.getMinBlockX();
+        int minBlockZ = chunkPos.getMinBlockZ();
+        Set<Long> unvisited = new HashSet<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                if (buildingColumn[localX * 16 + localZ]) {
+                    continue;
+                }
+                for (int y = minY; y < maxY; y++) {
+                    pos.set(minBlockX + localX, y, minBlockZ + localZ);
+                    if (isProtectedBlock(current.getBlockState(pos), config)) {
+                        unvisited.add(pos.asLong());
+                    }
+                }
+            }
+        }
+        ArrayDeque<BlockPos.MutableBlockPos> stack = new ArrayDeque<>();
+        while (!unvisited.isEmpty()) {
+            long seed = unvisited.iterator().next();
+            unvisited.remove(seed);
+            Set<Long> domain = new HashSet<>();
+            domain.add(seed);
+            stack.push(new BlockPos.MutableBlockPos(BlockPos.getX(seed), BlockPos.getY(seed), BlockPos.getZ(seed)));
+            while (!stack.isEmpty()) {
+                BlockPos.MutableBlockPos node = stack.pop();
+                int nodeX = node.getX();
+                int nodeY = node.getY();
+                int nodeZ = node.getZ();
+                for (int[] dir : SIX_NEIGHBORS) {
+                    int neighborX = nodeX + dir[0];
+                    int neighborY = nodeY + dir[1];
+                    int neighborZ = nodeZ + dir[2];
+                    if (neighborY < minY || neighborY >= maxY
+                            || neighborX < minBlockX || neighborX >= minBlockX + 16
+                            || neighborZ < minBlockZ || neighborZ >= minBlockZ + 16) {
+                        continue;
+                    }
+                    long neighborKey = BlockPos.asLong(neighborX, neighborY, neighborZ);
+                    if (unvisited.remove(neighborKey)) {
+                        domain.add(neighborKey);
+                        stack.push(new BlockPos.MutableBlockPos(neighborX, neighborY, neighborZ));
+                    }
+                }
+            }
+            if (domain.size() >= 2) {
+                for (long member : domain) {
+                    buildingColumn[(BlockPos.getX(member) & 15) * 16 + (BlockPos.getZ(member) & 15)] = true;
+                }
+            }
+        }
     }
 
     private static double effectiveBlend(double edge, boolean[] buildingColumn, int localX, int localZ) {
@@ -418,7 +304,7 @@ final class ChunkTerrainMerger {
 
     private static void preserveTreeCanopies(ChunkAccess current, ChunkAccess generatedNew, ChunkPos chunkPos,
                                              Set<Long> selectedChunks, long seed, int blendBlocks,
-                                             boolean[] buildingColumn, int minY, int maxY) {
+                                             boolean[] buildingColumn, int minY, int maxY, ProtectionConfig config) {
         boolean[] canopyZone = new boolean[256];
         for (int localX = 0; localX < 16; localX++) {
             for (int localZ = 0; localZ < 16; localZ++) {
@@ -441,7 +327,8 @@ final class ChunkTerrainMerger {
                 }
                 for (int y = minY; y < maxY; y++) {
                     pos.set(minBlockX + localX, y, minBlockZ + localZ);
-                    if (!current.getBlockState(pos).is(BlockTags.LOGS)) {
+                    BlockState state = current.getBlockState(pos);
+                    if (config.isExcluded(state) || !isPlayerWood(state)) {
                         continue;
                     }
                     long key = pos.asLong();
@@ -579,13 +466,14 @@ final class ChunkTerrainMerger {
         return clamp(blend + jitter, 0.0D, 1.0D);
     }
 
-    private static int groundSurfaceY(ChunkAccess chunk, int blockX, int blockZ, int minY, int maxY) {
+    private static int groundSurfaceY(ChunkAccess chunk, int blockX, int blockZ, int minY, int maxY,
+                                      ProtectionConfig config) {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(blockX, maxY - 1, blockZ);
         for (int y = maxY - 1; y >= minY; y--) {
             pos.setY(y);
             BlockState state = chunk.getBlockState(pos);
             if (state.isAir() || isFluid(state) || state.is(BlockTags.LEAVES) || state.is(BlockTags.LOGS)
-                    || isArtificialBuildBlock(state)) {
+                    || isProtectedBlock(state, config)) {
                 continue;
             }
             return y;
@@ -615,7 +503,7 @@ final class ChunkTerrainMerger {
     @SuppressWarnings("unchecked")
     private static void mergeBiomes(ChunkAccess current, ChunkAccess generatedNew,
                                     ChunkPos chunkPos, Set<Long> selectedChunks, long seed, int blendBlocks,
-                                    boolean[] buildingColumn) {
+                                    boolean[] buildingColumn, ProtectionConfig config) {
         LevelChunkSection[] oldSections = current.getSections();
         LevelChunkSection[] newSections = generatedNew.getSections();
         for (int sectionIndex = 0; sectionIndex < Math.min(oldSections.length, newSections.length); sectionIndex++) {
@@ -716,7 +604,7 @@ final class ChunkTerrainMerger {
 
     private static void mergeBlockEntities(CompoundTag currentTag, ChunkAccess current, ChunkAccess generatedNew,
                                            Set<Long> selectedChunks, long seed, int blendBlocks,
-                                           boolean[] buildingColumn) {
+                                           boolean[] buildingColumn, ProtectionConfig config) {
         Map<BlockPos, CompoundTag> currentBes = readBlockEntities(currentTag);
 
         for (BlockPos placePos : new HashSet<>(getBlockEntityMap(generatedNew).keySet())) {
@@ -726,7 +614,7 @@ final class ChunkTerrainMerger {
         for (Map.Entry<BlockPos, CompoundTag> entry : currentBes.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState state = generatedNew.getBlockState(pos);
-            if (isArtificialBuildBlock(state) && canLoadBlockEntity(entry.getValue(), state)) {
+            if (isProtectedBlock(state, config) && canLoadBlockEntity(entry.getValue(), state)) {
                 BlockEntity blockEntity = BlockEntity.loadStatic(pos, state, entry.getValue());
                 if (blockEntity != null) {
                     generatedNew.setBlockEntity(blockEntity);

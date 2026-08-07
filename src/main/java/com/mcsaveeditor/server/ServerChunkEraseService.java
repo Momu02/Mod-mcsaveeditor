@@ -141,6 +141,7 @@ public final class ServerChunkEraseService {
         private final RegionFileStorage entityStorage;
         private final long targetSeed;
         private final String biomeId;
+        private final ProtectionConfig protectionConfig;
         private final Set<Long> selectedChunks;
         private final int blendBlocks;
         private final int total;
@@ -162,6 +163,7 @@ public final class ServerChunkEraseService {
             this.entityStorage = openStorage(entityRegionPath);
             this.targetSeed = targetSeed;
             this.biomeId = biomeId;
+            this.protectionConfig = ProtectionConfig.defaults();
             this.selectedChunks = new HashSet<>();
 
             Set<Long> seen = new HashSet<>();
@@ -278,7 +280,8 @@ public final class ServerChunkEraseService {
                 merged = ChunkSerializer.write(level, generated);
             } else {
                 merged = ChunkTerrainMerger.merge(
-                        level, generated, pending.pos, current, selectedChunks, targetSeed, blendBlocks);
+                        level, generated, pending.pos, current, selectedChunks, targetSeed, blendBlocks,
+                        protectionConfig);
             }
             chunkMap.write(pending.pos, merged);
             if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
