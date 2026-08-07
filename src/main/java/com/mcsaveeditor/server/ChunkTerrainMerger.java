@@ -338,13 +338,13 @@ final class ChunkTerrainMerger {
                     stack.push(new BlockPos.MutableBlockPos().set(pos));
                     while (!stack.isEmpty()) {
                         BlockPos.MutableBlockPos node = stack.pop();
-                        BlockState state = current.getBlockState(node);
-                        if (!state.is(BlockTags.LOGS) && !state.is(BlockTags.LEAVES)) {
+                        BlockState nodeState = current.getBlockState(node);
+                        if (!nodeState.is(BlockTags.LOGS) && !nodeState.is(BlockTags.LEAVES)) {
                             continue;
                         }
                         BlockState newState = generatedNew.getBlockState(node);
-                        if (state != newState) {
-                            generatedNew.setBlockState(node, state, false);
+                        if (nodeState != newState) {
+                            generatedNew.setBlockState(node, nodeState, false);
                             generatedNew.removeBlockEntity(node);
                         }
                         int nodeX = node.getX();

@@ -583,7 +583,7 @@ public class ChunkEditorScreen extends Screen {
         } catch (NumberFormatException ignored) {
         }
         EditorPrefs.setBiome(biomeButton != null ? BIOMES[biomeIndex][0] : "");
-        EditorPrefs.setProtectedCategories(fusionCategories());
+        EditorPrefs.setProtectedCategories(String.join(",", fusionCategories()));
         EditorPrefs.setCellSize(cellSize);
         EditorPrefs.setPanX(panChunkX);
         EditorPrefs.setPanZ(panChunkZ);

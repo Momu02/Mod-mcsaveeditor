@@ -15,7 +15,7 @@ import net.minecraft.world.level.block.ChainBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
-import net.minecraft.world.level.block.GlassPaneBlock;
+import net.minecraft.world.level.block.StainedGlassPaneBlock;
 import net.minecraft.world.level.block.IronBarsBlock;
 import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.LanternBlock;
@@ -102,7 +102,7 @@ public final class ProtectionCategories {
                 || block instanceof DoorBlock
                 || block instanceof TrapDoorBlock
                 || block instanceof BedBlock
-                || block instanceof GlassPaneBlock
+                || block instanceof StainedGlassPaneBlock
                 || block instanceof IronBarsBlock
                 || block instanceof LadderBlock
                 || block instanceof LanternBlock
