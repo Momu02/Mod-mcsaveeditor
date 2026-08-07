@@ -79,7 +79,8 @@ public final class ServerChunkEraseService {
         long seed = packet.randomSeed() ? new Random().nextLong() : packet.seed();
         EraseJob job;
         try {
-            job = new EraseJob(level, packet.operation(), distinct, seed, packet.biomeId());
+            job = new EraseJob(level, packet.operation(), distinct, seed, packet.biomeId(),
+                    ProtectionConfig.fromCategories(packet.enabledCategories()));
         } catch (RuntimeException exception) {
             LOGGER.error("MC 存档区块编辑器：创建任务失败", exception);
             player.sendSystemMessage(Component.literal("MC 存档区块编辑器：创建任务失败，请检查存档目录权限。")
@@ -153,7 +154,7 @@ public final class ServerChunkEraseService {
         private boolean closed;
 
         private EraseJob(ServerLevel level, ChunkOperation operation, List<ChunkPos> chunks, long targetSeed,
-                         String biomeId) {
+                         String biomeId, ProtectionConfig protectionConfig) {
             this.level = level;
             this.operation = operation;
             this.chunkRegionPath = WorldStoragePaths.chunkRegion(level);
@@ -163,7 +164,7 @@ public final class ServerChunkEraseService {
             this.entityStorage = openStorage(entityRegionPath);
             this.targetSeed = targetSeed;
             this.biomeId = biomeId;
-            this.protectionConfig = ProtectionConfig.defaults();
+            this.protectionConfig = protectionConfig == null ? ProtectionConfig.defaults() : protectionConfig;
             this.selectedChunks = new HashSet<>();
 
             Set<Long> seen = new HashSet<>();

@@ -231,4 +231,9 @@ public final class ProtectionCategories {
         }
         return false;
     }
+
+    /** Category ids enabled by default (the GUI restores these on first run). */
+    public static List<String> defaultEnabledIds() {
+        return CATEGORIES.stream().filter(Category::defaultOn).map(Category::id).toList();
+    }
 }

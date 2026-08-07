@@ -5,6 +5,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -57,6 +58,30 @@ public final class ProtectionConfig {
     public ProtectionConfig exclude(ResourceLocation blockId) {
         excludedBlocks.add(blockId);
         return this;
+    }
+
+    /**
+     * Builds a config from a list of category ids sent by the client, ignoring
+     * unknown ids. When the list is empty the default categories are kept.
+     */
+    public static ProtectionConfig fromCategories(List<String> categoryIds) {
+        if (categoryIds.isEmpty()) {
+            return defaults();
+        }
+        ProtectionConfig config = empty();
+        for (String id : categoryIds) {
+            boolean known = false;
+            for (ProtectionCategories.Category category : ProtectionCategories.CATEGORIES) {
+                if (category.id().equals(id)) {
+                    known = true;
+                    break;
+                }
+            }
+            if (known) {
+                config.enabledCategories.add(id);
+            }
+        }
+        return config;
     }
 
     public Set<String> enabledCategories() {

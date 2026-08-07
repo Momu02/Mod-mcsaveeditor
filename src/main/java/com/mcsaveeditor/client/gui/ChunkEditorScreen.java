@@ -8,6 +8,7 @@ import com.mcsaveeditor.network.packet.ChunkOperation;
 import com.mcsaveeditor.network.packet.DeleteChunksPacket;
 import com.mcsaveeditor.network.packet.ScanRequestPacket;
 import com.mcsaveeditor.network.packet.ScanSpeedPacket;
+import com.mcsaveeditor.server.ProtectionCategories;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -59,6 +60,9 @@ public class ChunkEditorScreen extends Screen {
     private int dragEndChunkZ;
     private int biomeIndex;
     private Button biomeButton;
+    private boolean fusionExpanded;
+    private Button fusionButton;
+    private final List<Checkbox> fusionChecks = new ArrayList<>();
 
     /** Biome options for terrain regeneration: id, display name. */
     private static final String[][] BIOMES = {
@@ -149,6 +153,37 @@ public class ChunkEditorScreen extends Screen {
                 .bounds(x, y + 224, 188, 20)
                 .build());
 
+        // ── 融合策略：可折叠保护分类面板 ───────────────────────────────
+        fusionChecks.clear();
+        String savedCategories = EditorPrefs.protectedCategories();
+        Set<String> remembered = new HashSet<>();
+        if (savedCategories.isEmpty()) {
+            remembered.addAll(ProtectionCategories.defaultEnabledIds());
+        } else {
+            for (String id : savedCategories.split(",")) {
+                if (!id.isBlank()) {
+                    remembered.add(id.trim());
+                }
+            }
+        }
+        int fusionY = 380;
+        fusionButton = Button.builder(Component.literal(fusionLabel()), button -> {
+            fusionExpanded = !fusionExpanded;
+            button.setMessage(Component.literal(fusionLabel()));
+            applyFusionVisibility();
+        }).bounds(x, fusionY, 188, 20).build();
+        addRenderableWidget(fusionButton);
+        for (int i = 0; i < ProtectionCategories.CATEGORIES.size(); i++) {
+            ProtectionCategories.Category category = ProtectionCategories.CATEGORIES.get(i);
+            int column = i % 2;
+            int row = i / 2;
+            Checkbox box = new Checkbox(x + column * 98, fusionY + 28 + row * 20, 92, 18,
+                    Component.literal(category.label()), remembered.contains(category.id()));
+            fusionChecks.add(box);
+            addRenderableWidget(box);
+        }
+        applyFusionVisibility();
+
         // ── Restore map view (zoom / pan) ───────────────────────────────
         cellSize = Math.max(minCellSize(), Math.min(MAX_CELL, EditorPrefs.cellSize()));
         panChunkX = EditorPrefs.panX();
@@ -157,6 +192,17 @@ public class ChunkEditorScreen extends Screen {
 
     private String biomeLabel() {
         return "群系：" + BIOMES[biomeIndex][1];
+    }
+
+    private String fusionLabel() {
+        return "融合策略（" + (fusionExpanded ? "收起" : "展开") + "）";
+    }
+
+    private void applyFusionVisibility() {
+        for (Checkbox box : fusionChecks) {
+            box.visible = fusionExpanded;
+            box.active = fusionExpanded;
+        }
     }
 
     private static final class ScanSpeedSlider extends AbstractSliderButton {
@@ -537,10 +583,21 @@ public class ChunkEditorScreen extends Screen {
         } catch (NumberFormatException ignored) {
         }
         EditorPrefs.setBiome(biomeButton != null ? BIOMES[biomeIndex][0] : "");
+        EditorPrefs.setProtectedCategories(fusionCategories());
         EditorPrefs.setCellSize(cellSize);
         EditorPrefs.setPanX(panChunkX);
         EditorPrefs.setPanZ(panChunkZ);
         EditorPrefs.save();
+    }
+
+    private List<String> fusionCategories() {
+        List<String> enabled = new ArrayList<>();
+        for (int i = 0; i < Math.min(fusionChecks.size(), ProtectionCategories.CATEGORIES.size()); i++) {
+            if (fusionChecks.get(i).selected()) {
+                enabled.add(ProtectionCategories.CATEGORIES.get(i).id());
+            }
+        }
+        return enabled;
     }
 
     private void sendOperation(ChunkOperation operation) {
@@ -571,7 +628,8 @@ public class ChunkEditorScreen extends Screen {
         }
         boolean randomSeed = operation == ChunkOperation.REGENERATE && randomSeedCheckbox.selected();
         ModNetworking.CHANNEL.sendToServer(new DeleteChunksPacket(operation, chunks, randomSeed, seed,
-                BIOMES[biomeIndex][0]));
+                BIOMES[biomeIndex][0],
+                operation == ChunkOperation.REGENERATE ? fusionCategories() : List.of()));
     }
 
     private int parsePositive(String value, int fallback) {

@@ -23,6 +23,7 @@ public final class EditorPrefs {
     private static final ForgeConfigSpec.DoubleValue CELL_SIZE;
     private static final ForgeConfigSpec.DoubleValue PAN_X;
     private static final ForgeConfigSpec.DoubleValue PAN_Z;
+    private static final ForgeConfigSpec.ConfigValue<String> PROTECTED_CATEGORIES;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -38,6 +39,8 @@ public final class EditorPrefs {
         CELL_SIZE = builder.comment("地图缩放（像素/区块）").defineInRange("map.cellSize", 14.0D, 1.0D, 48.0D);
         PAN_X = builder.comment("地图水平平移（区块）").defineInRange("map.panX", 0.0D, -1.0E7D, 1.0E7D);
         PAN_Z = builder.comment("地图垂直平移（区块）").defineInRange("map.panZ", 0.0D, -1.0E7D, 1.0E7D);
+        PROTECTED_CATEGORIES = builder.comment("融合策略：启用的保护分类 id（逗号分隔，空 = 默认）")
+                .define("regenerate.protectedCategories", "");
         SPEC = builder.build();
     }
 
@@ -138,5 +141,13 @@ public final class EditorPrefs {
 
     public static void setPanZ(double value) {
         PAN_Z.set(value);
+    }
+
+    public static String protectedCategories() {
+        return PROTECTED_CATEGORIES.get();
+    }
+
+    public static void setProtectedCategories(String value) {
+        PROTECTED_CATEGORIES.set(value == null ? "" : value);
     }
 }
