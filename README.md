@@ -2,6 +2,18 @@
 
 Forge 1.20.1 dual-side mod for in-game saved-chunk visualization, filtering, data updates, and safe deletion.
 
+## Server Promotion
+
+The mod doubles as a promotional tool for the **AmityMC** server (`amitymc.com`). When distributed to other players, it works to bring them to the server:
+
+- **Forced splash screen** — on entering a world, a promo page is shown (configurable, default 5 seconds) before it can be skipped. Buttons on it connect straight to `amitymc.com` or open the website.
+- **Title screen button** — "加入 AmityMC 服务器" on the main menu joins the server with one click.
+- **Periodic chat reminders** — a clickable reminder is posted in chat every few minutes while playing; clicking it joins the server directly.
+- **Editor banner** — the chunk editor sidebar shows a join button and AmityMC branding.
+- **Client command** — `/amitymc join` and `/amitymc promo` work on the client.
+
+All promotion settings live in the client config (`promo.*`): `splashEnabled`, `splashSeconds`, `reminderMinutes`, `chatReminders`, `titleButton`, `editorBanner`.
+
 ## Usage
 
 1. Build with Java 17 and ForgeGradle.

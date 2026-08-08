@@ -1,6 +1,8 @@
 package com.mcsaveeditor.client.gui;
 
 import com.mcsaveeditor.client.EditorPrefs;
+import com.mcsaveeditor.client.PromoConfig;
+import com.mcsaveeditor.client.promo.PromoClient;
 import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.network.packet.CancelScanPacket;
 import com.mcsaveeditor.network.packet.ChunkTimeEntry;
@@ -184,6 +186,13 @@ public class ChunkEditorScreen extends Screen {
         }
         applyFusionVisibility();
 
+        if (PromoConfig.editorBanner()) {
+            addRenderableWidget(Button.builder(Component.literal("▶ 加入 AmityMC 服务器 (amitymc.com)")
+                            .withStyle(ChatFormatting.GOLD), button -> PromoClient.joinServer())
+                    .bounds(x, height - 28, 188, 20)
+                    .build());
+        }
+
         // ── Restore map view (zoom / pan) ───────────────────────────────
         cellSize = Math.max(minCellSize(), Math.min(MAX_CELL, EditorPrefs.cellSize()));
         panChunkX = EditorPrefs.panX();
@@ -285,6 +294,10 @@ public class ChunkEditorScreen extends Screen {
                 + "  缩放：" + Math.round(cellSize), 12, 338, 0xFFBFC5D2);
         long viewBlocks = Math.round((width - SIDEBAR_WIDTH) / cellSize * 16.0D);
         graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 352, 0xFFBFC5D2);
+        if (PromoConfig.editorBanner()) {
+            graphics.drawString(font, "本工具由 AmityMC 提供支持", 12, height - 52, 0xFFF2C230);
+            graphics.drawString(font, "官网: amitymc.com", 12, height - 40, 0xFFBFC5D2);
+        }
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {

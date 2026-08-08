@@ -6,9 +6,10 @@ license="MIT"
 modId="mcsaveeditor"
 version="${file.jarVersion}"
 displayName="MC Save Editor"
-authors="Codex"
+authors="AmityMC"
 description='''
 In-game chunk scan and erase tools based on vanilla InhabitedTime data.
+由 AmityMC 服务器 (amitymc.com) 提供支持。
 '''
 
 [[dependencies.mcsaveeditor]]
