@@ -188,12 +188,6 @@ public class ChunkEditorScreen extends Screen {
         }
         applyFusionVisibility();
 
-        // ── 推广：屏幕右下角一个小按钮，仅编辑器内可见 ───────────────
-        addRenderableWidget(Button.builder(Component.literal("加入 AmityMC").withStyle(ChatFormatting.GOLD),
-                        button -> joinAmity())
-                .bounds(width - 128, height - 28, 120, 20)
-                .build());
-
         // ── Restore map view (zoom / pan) ───────────────────────────────
         cellSize = Math.max(minCellSize(), Math.min(MAX_CELL, EditorPrefs.cellSize()));
         panChunkX = EditorPrefs.panX();
@@ -282,6 +276,24 @@ public class ChunkEditorScreen extends Screen {
         renderMap(graphics, mouseX, mouseY);
         renderSidebar(graphics);
         super.render(graphics, mouseX, mouseY, partialTick);
+        renderPromoButton(graphics, mouseX, mouseY);
+    }
+
+    private static final int PROMO_BTN_X_OFFSET = 128;
+    private static final int PROMO_BTN_WIDTH = 120;
+    private static final int PROMO_BTN_HEIGHT = 20;
+
+    private void renderPromoButton(GuiGraphics graphics, int mouseX, int mouseY) {
+        int bx = width - PROMO_BTN_X_OFFSET;
+        int by = height - PROMO_BTN_HEIGHT - 4;
+        boolean hovered = mouseX >= bx && mouseX < bx + PROMO_BTN_WIDTH
+                && mouseY >= by && mouseY < by + PROMO_BTN_HEIGHT;
+        int bg = hovered ? 0xFF5A5A5A : 0xFF3A3A3A;
+        graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + PROMO_BTN_HEIGHT, bg);
+        graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + 1, 0xFF888888);
+        String text = "加入 AmityMC";
+        int tw = font.width(text);
+        graphics.drawString(font, text, bx + (PROMO_BTN_WIDTH - tw) / 2, by + 6, 0xFFFFD700, true);
     }
 
     private void renderSidebar(GuiGraphics graphics) {
@@ -469,6 +481,14 @@ public class ChunkEditorScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (mouseX < SIDEBAR_WIDTH) {
             return super.mouseClicked(mouseX, mouseY, button);
+        }
+
+        int bx = width - PROMO_BTN_X_OFFSET;
+        int by = height - PROMO_BTN_HEIGHT - 4;
+        if (button == 0 && mouseX >= bx && mouseX < bx + PROMO_BTN_WIDTH
+                && mouseY >= by && mouseY < by + PROMO_BTN_HEIGHT) {
+            joinAmity();
+            return true;
         }
 
         dragStartChunkX = screenToChunkX(mouseX);
