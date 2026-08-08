@@ -20,6 +20,7 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
 
@@ -300,8 +301,9 @@ public class ChunkEditorScreen extends Screen {
 
     private void joinAmity() {
         Minecraft mc = Minecraft.getInstance();
-        mc.setScreen(new ConnectScreen(mc.screen, mc,
-                new ServerData(PromoInfo.SERVER_NAME, PromoInfo.SERVER_IP, false)));
+        ServerAddress address = ServerAddress.parseString(PromoInfo.SERVER_IP);
+        ServerData data = new ServerData(PromoInfo.SERVER_NAME, PromoInfo.SERVER_IP, false);
+        ConnectScreen.startConnecting(mc.screen, mc, address, data, false);
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
