@@ -188,10 +188,10 @@ public class ChunkEditorScreen extends Screen {
         }
         applyFusionVisibility();
 
-        // ── 低调推广：侧边栏底部一小块，不弹窗不强推 ───────────────────
+        // ── 低调推广：地图区右上角横幅 + 加入按钮，不弹窗不强推 ──────
         addRenderableWidget(Button.builder(Component.literal("▶ 加入 AmityMC (amitymc.com)")
                         .withStyle(ChatFormatting.GOLD), button -> joinAmity())
-                .bounds(x, height - 28, 188, 20)
+                .bounds(width - 188, 60, 180, 20)
                 .build());
 
         // ── Restore map view (zoom / pan) ───────────────────────────────
@@ -295,8 +295,6 @@ public class ChunkEditorScreen extends Screen {
                 + "  缩放：" + Math.round(cellSize), 12, 338, 0xFFBFC5D2);
         long viewBlocks = Math.round((width - SIDEBAR_WIDTH) / cellSize * 16.0D);
         graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 352, 0xFFBFC5D2);
-        graphics.drawString(font, "本工具由 AmityMC 提供支持", 12, height - 52, 0xFFF2C230);
-        graphics.drawString(font, "官网: amitymc.com", 12, height - 40, 0xFFBFC5D2);
     }
 
     private void joinAmity() {
@@ -344,6 +342,17 @@ public class ChunkEditorScreen extends Screen {
             int chunkZ = screenToChunkZ(mouseY);
             graphics.drawString(font, chunkX + ", " + chunkZ, mouseX + 8, mouseY + 8, 0xFFFFFFFF);
         }
+
+        // ── 推广横幅：地图区右上角，最后绘制保证盖在最上层 ────────────
+        int bannerW = 180;
+        int bannerX = width - bannerW;
+        int bannerH = 54;
+        graphics.fill(bannerX, 0, width, bannerH, 0xE0151A1E);
+        graphics.fill(bannerX, 0, width, 2, 0xFFF2C230);
+        graphics.drawString(font, PromoInfo.SERVER_NAME + " 服务器", bannerX + 8, 8, 0xFFF2C230);
+        graphics.drawString(font, "IP: " + PromoInfo.SERVER_IP, bannerX + 8, 19, 0xFFBFC5D2);
+        graphics.drawString(font, "官网: " + PromoInfo.WEBSITE_URL.replace("https://", ""),
+                bannerX + 8, 30, 0xFFBFC5D2);
     }
 
     private void drawTerrain(GuiGraphics graphics, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
