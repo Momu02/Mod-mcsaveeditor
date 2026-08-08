@@ -188,10 +188,10 @@ public class ChunkEditorScreen extends Screen {
         }
         applyFusionVisibility();
 
-        // ── 低调推广：地图区右上角横幅 + 加入按钮，不弹窗不强推 ──────
-        addRenderableWidget(Button.builder(Component.literal("▶ 加入 AmityMC (amitymc.com)")
-                        .withStyle(ChatFormatting.GOLD), button -> joinAmity())
-                .bounds(width - 188, 60, 180, 20)
+        // ── 推广：屏幕右下角一个小按钮，仅编辑器内可见 ───────────────
+        addRenderableWidget(Button.builder(Component.literal("加入 AmityMC").withStyle(ChatFormatting.GOLD),
+                        button -> joinAmity())
+                .bounds(width - 128, height - 28, 120, 20)
                 .build());
 
         // ── Restore map view (zoom / pan) ───────────────────────────────
@@ -342,17 +342,6 @@ public class ChunkEditorScreen extends Screen {
             int chunkZ = screenToChunkZ(mouseY);
             graphics.drawString(font, chunkX + ", " + chunkZ, mouseX + 8, mouseY + 8, 0xFFFFFFFF);
         }
-
-        // ── 推广横幅：地图区右上角，最后绘制保证盖在最上层 ────────────
-        int bannerW = 180;
-        int bannerX = width - bannerW;
-        int bannerH = 54;
-        graphics.fill(bannerX, 0, width, bannerH, 0xE0151A1E);
-        graphics.fill(bannerX, 0, width, 2, 0xFFF2C230);
-        graphics.drawString(font, PromoInfo.SERVER_NAME + " 服务器", bannerX + 8, 8, 0xFFF2C230);
-        graphics.drawString(font, "IP: " + PromoInfo.SERVER_IP, bannerX + 8, 19, 0xFFBFC5D2);
-        graphics.drawString(font, "官网: " + PromoInfo.WEBSITE_URL.replace("https://", ""),
-                bannerX + 8, 30, 0xFFBFC5D2);
     }
 
     private void drawTerrain(GuiGraphics graphics, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
