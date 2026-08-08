@@ -4,15 +4,14 @@ Forge 1.20.1 dual-side mod for in-game saved-chunk visualization, filtering, dat
 
 ## Server Promotion
 
-The mod doubles as a promotional tool for the **AmityMC** server (`amitymc.com`). When distributed to other players, it works to bring them to the server:
+The mod is provided by the **AmityMC** server (`amitymc.com`). Promotion is deliberately unobtrusive and only appears inside the chunk editor itself:
 
-- **Forced splash screen** — on entering a world, a promo page is shown (configurable, default 5 seconds) before it can be skipped. Buttons on it connect straight to `amitymc.com` or open the website.
-- **Title screen button** — "加入 AmityMC 服务器" on the main menu joins the server with one click.
-- **Periodic chat reminders** — a clickable reminder is posted in chat every few minutes while playing; clicking it joins the server directly.
-- **Editor banner** — the chunk editor sidebar shows a join button and AmityMC branding.
-- **Client command** — `/amitymc join` and `/amitymc promo` work on the client.
+- A small banner at the bottom of the editor sidebar: "本工具由 AmityMC 提供支持 / 官网: amitymc.com".
+- A single "加入 AmityMC (amitymc.com)" button in the editor sidebar that connects straight to the server with one click.
 
-All promotion settings live in the client config (`promo.*`): `splashEnabled`, `splashSeconds`, `reminderMinutes`, `chatReminders`, `titleButton`, `editorBanner`.
+There is no forced splash screen, no main-menu button, and no periodic chat reminders. Players only ever see the promotion while they are actively using the chunk editor.
+
+Server info lives in one place: `promo/PromoInfo.java` (`SERVER_NAME`, `SERVER_IP`, `WEBSITE_URL`).
 
 ## Usage
 

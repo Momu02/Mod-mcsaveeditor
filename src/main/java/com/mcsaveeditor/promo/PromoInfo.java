@@ -20,10 +20,4 @@ public final class PromoInfo {
 
     /** Short slogan shown under the server name on the splash screen. */
     public static final String SLOGAN = "原汁原味生存 · 长期稳定 · 玩家至上";
-
-    /** Extra promotional lines drawn on the splash screen. */
-    public static final String[] TAGLINES = {
-            "在线人数常年火爆，欢迎入驻！",
-            "本工具由 AmityMC 服务器提供支持"
-    };
 }

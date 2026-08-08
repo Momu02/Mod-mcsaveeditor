@@ -1,7 +1,6 @@
 package com.mcsaveeditor.client;
 
 import com.mcsaveeditor.client.gui.ChunkEditorScreen;
-import com.mcsaveeditor.client.promo.PromoClient;
 import com.mcsaveeditor.network.packet.DeletedChunksPacket;
 import com.mcsaveeditor.network.packet.ScanResultPacket;
 import net.minecraft.client.Minecraft;
@@ -11,8 +10,7 @@ public final class ClientPacketHandlers {
     }
 
     public static void openEditor(int centerChunkX, int centerChunkZ) {
-        ChunkEditorScreen editor = new ChunkEditorScreen(centerChunkX, centerChunkZ);
-        Minecraft.getInstance().setScreen(PromoClient.withPromo(editor));
+        Minecraft.getInstance().setScreen(new ChunkEditorScreen(centerChunkX, centerChunkZ));
     }
 
     public static void handleScanResult(ScanResultPacket packet) {

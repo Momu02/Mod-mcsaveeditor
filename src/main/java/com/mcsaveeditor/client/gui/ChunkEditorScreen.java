@@ -1,8 +1,7 @@
 package com.mcsaveeditor.client.gui;
 
 import com.mcsaveeditor.client.EditorPrefs;
-import com.mcsaveeditor.client.PromoConfig;
-import com.mcsaveeditor.client.promo.PromoClient;
+import com.mcsaveeditor.promo.PromoInfo;
 import com.mcsaveeditor.network.ModNetworking;
 import com.mcsaveeditor.network.packet.CancelScanPacket;
 import com.mcsaveeditor.network.packet.ChunkTimeEntry;
@@ -18,7 +17,9 @@ import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
 
@@ -186,12 +187,11 @@ public class ChunkEditorScreen extends Screen {
         }
         applyFusionVisibility();
 
-        if (PromoConfig.editorBanner()) {
-            addRenderableWidget(Button.builder(Component.literal("▶ 加入 AmityMC 服务器 (amitymc.com)")
-                            .withStyle(ChatFormatting.GOLD), button -> PromoClient.joinServer())
-                    .bounds(x, height - 28, 188, 20)
-                    .build());
-        }
+        // ── 低调推广：侧边栏底部一小块，不弹窗不强推 ───────────────────
+        addRenderableWidget(Button.builder(Component.literal("▶ 加入 AmityMC (amitymc.com)")
+                        .withStyle(ChatFormatting.GOLD), button -> joinAmity())
+                .bounds(x, height - 28, 188, 20)
+                .build());
 
         // ── Restore map view (zoom / pan) ───────────────────────────────
         cellSize = Math.max(minCellSize(), Math.min(MAX_CELL, EditorPrefs.cellSize()));
@@ -294,10 +294,14 @@ public class ChunkEditorScreen extends Screen {
                 + "  缩放：" + Math.round(cellSize), 12, 338, 0xFFBFC5D2);
         long viewBlocks = Math.round((width - SIDEBAR_WIDTH) / cellSize * 16.0D);
         graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 352, 0xFFBFC5D2);
-        if (PromoConfig.editorBanner()) {
-            graphics.drawString(font, "本工具由 AmityMC 提供支持", 12, height - 52, 0xFFF2C230);
-            graphics.drawString(font, "官网: amitymc.com", 12, height - 40, 0xFFBFC5D2);
-        }
+        graphics.drawString(font, "本工具由 AmityMC 提供支持", 12, height - 52, 0xFFF2C230);
+        graphics.drawString(font, "官网: amitymc.com", 12, height - 40, 0xFFBFC5D2);
+    }
+
+    private void joinAmity() {
+        Minecraft mc = Minecraft.getInstance();
+        mc.setScreen(new ConnectScreen(mc.screen, mc,
+                new ServerData(PromoInfo.SERVER_NAME, PromoInfo.SERVER_IP, false)));
     }
 
     private void renderMap(GuiGraphics graphics, int mouseX, int mouseY) {
