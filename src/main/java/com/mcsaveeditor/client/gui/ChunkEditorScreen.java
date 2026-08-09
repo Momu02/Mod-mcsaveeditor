@@ -66,6 +66,7 @@ public class ChunkEditorScreen extends Screen {
     private Button biomeButton;
     private boolean fusionExpanded;
     private Button fusionButton;
+    private int promoLogFrame = -1;
     private final List<Checkbox> fusionChecks = new ArrayList<>();
 
     /** Biome options for terrain regeneration: id, display name. */
@@ -284,29 +285,35 @@ public class ChunkEditorScreen extends Screen {
     private static final int PROMO_BTN_HEIGHT = 20;
 
     private void renderPromoButton(GuiGraphics graphics, int mouseX, int mouseY) {
+        String text = "加入 AmityMC";
+        int textWidth = font.width(text);
         int bx = width - PROMO_BTN_X_OFFSET;
         int by = height - PROMO_BTN_HEIGHT - 4;
         boolean hovered = mouseX >= bx && mouseX < bx + PROMO_BTN_WIDTH
                 && mouseY >= by && mouseY < by + PROMO_BTN_HEIGHT;
-        int bg = hovered ? 0xFF5A5A5A : 0xFF3A3A3A;
-        graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + PROMO_BTN_HEIGHT, bg);
-        graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + 1, 0xFF888888);
-        String text = "加入 AmityMC";
-        int tw = font.width(text);
-        graphics.drawString(font, text, bx + (PROMO_BTN_WIDTH - tw) / 2, by + 6, 0xFFFFD700, true);
+        if (hovered) {
+            graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + PROMO_BTN_HEIGHT, 0xFF555566);
+        }
+        graphics.drawString(font, text, bx + (PROMO_BTN_WIDTH - textWidth) / 2, by + 6, 0xFFB8860B, true);
+        if (promoLogFrame == -1) {
+            promoLogFrame = 0;
+            System.out.println("[AmityMC] promo button rendered at " + bx + "," + by);
+        }
     }
 
     private void renderSidebar(GuiGraphics graphics) {
         graphics.fill(0, 0, SIDEBAR_WIDTH, height, 0xE81B1D22);
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
-        graphics.drawString(font, "MC 存档区块编辑器", 12, 14, 0xFFFFFFFF);
+        graphics.drawString(font, "MC 存档区块编辑器", 12, 12, 0xFFFFFFFF);
         graphics.drawString(font, "筛选条件（勾选后生效）", 12, 28, 0xFFBFC5D2);
         graphics.drawString(font, "已选择：" + selected.size() + "  扫描：" + scanned.size(), 12, 310, 0xFFFFFFFF);
-        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 324, 0xFFF2C230);
+        graphics.drawString(font, "黄色：附近玩家受保护区块", 12, 324, 0xFFF2C230);
         graphics.drawString(font, "中心：" + centerChunkX + ", " + centerChunkZ
                 + "  缩放：" + Math.round(cellSize), 12, 338, 0xFFBFC5D2);
         long viewBlocks = Math.round((width - SIDEBAR_WIDTH) / cellSize * 16.0D);
         graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 352, 0xFFBFC5D2);
+        // 与上面完全相同的渲染路径：侧栏固定位置画服务
+        graphics.drawString(font, "AmityMC 服务器 amitymc.com", 12, 366, 0xFFB8860B);
     }
 
     private void joinAmity() {
