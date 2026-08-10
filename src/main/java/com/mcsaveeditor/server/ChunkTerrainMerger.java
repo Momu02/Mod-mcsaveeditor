@@ -42,7 +42,7 @@ import java.util.Set;
 final class ChunkTerrainMerger {
     private static final int DEEP_BLEND_DEPTH = 24;
     private static final int BUILDING_HALO_BLOCKS = 4;
-    static final int EDGE_BLEND_BLOCKS = 64;
+    static final int EDGE_BLEND_BLOCKS = 128;
     private static final int[][] SIX_NEIGHBORS = {
             {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     };

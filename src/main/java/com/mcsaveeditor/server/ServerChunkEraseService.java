@@ -183,7 +183,7 @@ public final class ServerChunkEraseService {
                 }
             }
             int halfWidth = Math.max((maxX - minX + 1) / 2, (maxZ - minZ + 1) / 2);
-            this.blendBlocks = Math.max(8, Math.min(ChunkTerrainMerger.EDGE_BLEND_BLOCKS, halfWidth * 8));
+            this.blendBlocks = Math.max(8, Math.min(ChunkTerrainMerger.EDGE_BLEND_BLOCKS, halfWidth * 16));
             this.total = queue.size();
             level.getChunkSource().save(true);
         }
