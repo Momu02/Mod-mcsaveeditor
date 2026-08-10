@@ -34,8 +34,8 @@ final class TerrainGeneration {
     /**
      * Generates a fresh chunk (biomes + noise + surface) for the given seed.
      * When {@code biomeId} is a valid registry id, every block column of the
-     * chunk is forced to that biome <em>before</em> the noise is filled, so
-     * the terrain shape matches the target biome (e.g. ocean = low, mountains = high).
+     * chunk is forced to that biome before the surface is built, so the
+     * surface blocks (sand, snow, …) match the chosen biome.
      */
     static ChunkAccess generate(ServerLevel level, ChunkPos pos, long seed, String biomeId) {
         var generator = level.getChunkSource().getGenerator();
@@ -53,12 +53,9 @@ final class TerrainGeneration {
 
         generator.createBiomes(executor, randomState, Blender.empty(), structures, chunk).join();
         chunk.setStatus(ChunkStatus.BIOMES);
-
-        overrideBiomes(chunk, level, biomeId);
-
         generator.fillFromNoise(executor, Blender.empty(), randomState, structures, chunk).join();
         chunk.setStatus(ChunkStatus.NOISE);
-
+        overrideBiomes(chunk, level, biomeId);
         List<ChunkAccess> chunks = List.of(chunk);
         WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.SURFACE, 1);
         generator.buildSurface(region, structures, randomState, chunk);

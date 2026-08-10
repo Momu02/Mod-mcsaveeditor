@@ -42,7 +42,7 @@ import java.util.Set;
 final class ChunkTerrainMerger {
     private static final int DEEP_BLEND_DEPTH = 24;
     private static final int BUILDING_HALO_BLOCKS = 4;
-    static final int EDGE_BLEND_BLOCKS = 128;
+    static final int EDGE_BLEND_BLOCKS = 96;
     private static final int[][] SIX_NEIGHBORS = {
             {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     };
@@ -384,23 +384,28 @@ final class ChunkTerrainMerger {
     }
 
     private static int distanceToOutside(int blockX, int blockZ, Set<Long> selectedChunks, int maxDist) {
-        int min = maxDist;
-        for (int dx = -maxDist; dx <= maxDist; dx++) {
-            for (int dz = -maxDist; dz <= maxDist; dz++) {
-                int chebyshev = Math.max(Math.abs(dx), Math.abs(dz));
-                if (chebyshev >= min) {
-                    continue;
+        int chunkX = blockX >> 4;
+        int chunkZ = blockZ >> 4;
+        int maxChunks = (maxDist + 15) >> 4;
+        for (int d = 0; d <= maxChunks; d++) {
+            for (int dx = -d; dx <= d; dx++) {
+                if (!selectedChunks.contains(ChunkPos.asLong(chunkX + dx, chunkZ - d))) {
+                    return d * 16;
                 }
-                long key = ChunkPos.asLong((blockX + dx) >> 4, (blockZ + dz) >> 4);
-                if (!selectedChunks.contains(key)) {
-                    min = chebyshev;
-                    if (min == 0) {
-                        return 0;
-                    }
+                if (!selectedChunks.contains(ChunkPos.asLong(chunkX + dx, chunkZ + d))) {
+                    return d * 16;
+                }
+            }
+            for (int dz = -d + 1; dz <= d - 1; dz++) {
+                if (!selectedChunks.contains(ChunkPos.asLong(chunkX - d, chunkZ + dz))) {
+                    return d * 16;
+                }
+                if (!selectedChunks.contains(ChunkPos.asLong(chunkX + d, chunkZ + dz))) {
+                    return d * 16;
                 }
             }
         }
-        return min;
+        return maxDist;
     }
 
     private static BlockState blendBlockState(ChunkAccess oldTerrain, ChunkAccess newTerrain,
