@@ -451,8 +451,30 @@ public class ChunkEditorScreen extends Screen {
     }
 
     private void drawProtectedOverlays(GuiGraphics graphics, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+        int guardDistance = mc.options.getEffectiveRenderDistance() + 1;
+        ChunkPos playerChunk = mc.player.chunkPosition();
+        boolean singlePlayer = mc.isSingleplayer();
         for (ChunkTimeEntry entry : scanned.values()) {
-            if (!entry.protectedChunk()) {
+            boolean protectedChunk;
+            if (singlePlayer && mc.level != null && mc.getSingleplayerServer() != null) {
+                protectedChunk = false;
+                for (net.minecraft.server.level.ServerPlayer sp : mc.getSingleplayerServer().getPlayerList().getPlayers()) {
+                    ChunkPos spChunk = sp.chunkPosition();
+                    if (Math.max(Math.abs(spChunk.x - entry.chunkX()), Math.abs(spChunk.z - entry.chunkZ()))
+                            <= mc.getSingleplayerServer().getPlayerList().getViewDistance() + 1) {
+                        protectedChunk = true;
+                        break;
+                    }
+                }
+            } else {
+                protectedChunk = Math.max(Math.abs(playerChunk.x - entry.chunkX()),
+                        Math.abs(playerChunk.z - entry.chunkZ())) <= guardDistance;
+            }
+            if (!protectedChunk) {
                 continue;
             }
             int x0 = chunkToScreenX(entry.chunkX());

@@ -245,26 +245,28 @@ public final class ServerChunkEraseService {
                 PendingChunk pending = queue.poll();
                 if (pending != null) {
                     if (isNearAnyPlayer(pending.pos) || level.getChunkSource().hasChunk(pending.pos.x, pending.pos.z)) {
-                        deferOrSkip(pending);
-                    } else {
-                        ChunkMap chunkMap = level.getChunkSource().chunkMap;
-                        CompoundTag current = null;
-                        try {
-                            if (AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos)) {
-                                current = chunkMap.read(pending.pos).join().orElse(null);
-                            }
-                        } catch (Exception exception) {
-                            LOGGER.warn("MC 存档区块编辑器读取区块 {} 数据失败，稍后重试", pending.pos, exception);
+                        if (!forceUnload(pending.pos)) {
                             deferOrSkip(pending);
-                            return;
+                            continue;
                         }
-                        ChunkPos pos = pending.pos;
-                        long seed = targetSeed;
-                        pendingGenPos = pending;
-                        pendingGenCurrent = current;
-                        pendingGen = CompletableFuture.supplyAsync(
-                                () -> TerrainGeneration.generate(level, pos, seed, biomeId), Util.backgroundExecutor());
                     }
+                    ChunkMap chunkMap = level.getChunkSource().chunkMap;
+                    CompoundTag current = null;
+                    try {
+                        if (AnvilChunkIo.regionFileExists(chunkRegionPath, pending.pos)) {
+                            current = chunkMap.read(pending.pos).join().orElse(null);
+                        }
+                    } catch (Exception exception) {
+                        LOGGER.warn("MC 存档区块编辑器读取区块 {} 数据失败，稍后重试", pending.pos, exception);
+                        deferOrSkip(pending);
+                        continue;
+                    }
+                    ChunkPos pos = pending.pos;
+                    long seed = targetSeed;
+                    pendingGenPos = pending;
+                    pendingGenCurrent = current;
+                    pendingGen = CompletableFuture.supplyAsync(
+                            () -> TerrainGeneration.generate(level, pos, seed, biomeId), Util.backgroundExecutor());
                 }
             }
             if (!completed.isEmpty()) {
@@ -298,11 +300,7 @@ public final class ServerChunkEraseService {
 
             level.setChunkForced(pos.x, pos.z, false);
 
-            if (isNearAnyPlayer(pos)) {
-                return deferOrSkip(pending);
-            }
-
-            if (chunkSource.hasChunk(pos.x, pos.z)) {
+            if (isNearAnyPlayer(pos) || chunkSource.hasChunk(pos.x, pos.z)) {
                 return deferOrSkip(pending);
             }
 
@@ -324,12 +322,8 @@ public final class ServerChunkEraseService {
         }
 
         private ProcessResult deferOrSkip(PendingChunk pending) {
-            if (pending.retries++ < MAX_RETRIES) {
-                queue.add(pending);
-                return ProcessResult.DEFERRED;
-            }
-            skipped++;
-            return ProcessResult.SKIPPED;
+            queue.add(pending);
+            return ProcessResult.DEFERRED;
         }
 
         private boolean processStoredChunk(PendingChunk pending) throws Exception {
@@ -437,6 +431,26 @@ public final class ServerChunkEraseService {
             for (ServerPlayer player : level.players()) {
                 player.connection.send(packet);
             }
+        }
+
+        /**
+         * Unloads a loaded chunk from the server cache so the regenerated
+         * disk data is reloaded fresh instead of being overwritten by the
+         * stale in-memory copy. Returns true when the chunk is no longer
+         * loaded (or was never loaded), so the caller can proceed to process it.
+         */
+        private boolean forceUnload(ChunkPos pos) {
+            ServerChunkCache chunkSource = level.getChunkSource();
+            if (!chunkSource.hasChunk(pos.x, pos.z)) {
+                forgetClientChunk(pos);
+                return true;
+            }
+            level.setChunkForced(pos.x, pos.z, false);
+            forgetClientChunk(pos);
+            if (!chunkSource.hasChunk(pos.x, pos.z)) {
+                return true;
+            }
+            return false;
         }
 
         private boolean isNearAnyPlayer(ChunkPos target) {
