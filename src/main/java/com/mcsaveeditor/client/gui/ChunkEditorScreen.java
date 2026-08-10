@@ -66,7 +66,6 @@ public class ChunkEditorScreen extends Screen {
     private Button biomeButton;
     private boolean fusionExpanded;
     private Button fusionButton;
-    private int promoLogFrame = -1;
     private final List<Checkbox> fusionChecks = new ArrayList<>();
 
     /** Biome options for terrain regeneration: id, display name. */
@@ -283,37 +282,52 @@ public class ChunkEditorScreen extends Screen {
     private static final int PROMO_BTN_X_OFFSET = 128;
     private static final int PROMO_BTN_WIDTH = 120;
     private static final int PROMO_BTN_HEIGHT = 20;
+    private static final int PROMO_TEXT_COLOR = 0xFFB8860B;
+    private static final int PROMO_TEXT_HOVER_COLOR = 0xFFFFD700;
+    private static final int PROMO_BG_IDLE = 0x99333340;
+    private static final int PROMO_BG_HOVER = 0xCC555566;
 
+    private int promoButtonX() {
+        return width - PROMO_BTN_X_OFFSET;
+    }
+
+    private int promoButtonY() {
+        return height - PROMO_BTN_HEIGHT - 4;
+    }
+
+    /** Bottom-right join button, drawn directly (bypasses widget system). */
     private void renderPromoButton(GuiGraphics graphics, int mouseX, int mouseY) {
-        String text = "加入 AmityMC";
+        int bx = promoButtonX();
+        int by = promoButtonY();
+        boolean hovered = isPromoHovered(mouseX, mouseY);
+        graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + PROMO_BTN_HEIGHT,
+                hovered ? PROMO_BG_HOVER : PROMO_BG_IDLE);
+        String text = "加入 " + PromoInfo.SERVER_NAME;
         int textWidth = font.width(text);
-        int bx = width - PROMO_BTN_X_OFFSET;
-        int by = height - PROMO_BTN_HEIGHT - 4;
-        boolean hovered = mouseX >= bx && mouseX < bx + PROMO_BTN_WIDTH
+        graphics.drawString(font, text, bx + (PROMO_BTN_WIDTH - textWidth) / 2, by + 6,
+                hovered ? PROMO_TEXT_HOVER_COLOR : PROMO_TEXT_COLOR, true);
+        graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + 1, 0xFF777788);
+    }
+
+    private boolean isPromoHovered(int mouseX, int mouseY) {
+        int bx = promoButtonX();
+        int by = promoButtonY();
+        return mouseX >= bx && mouseX < bx + PROMO_BTN_WIDTH
                 && mouseY >= by && mouseY < by + PROMO_BTN_HEIGHT;
-        if (hovered) {
-            graphics.fill(bx, by, bx + PROMO_BTN_WIDTH, by + PROMO_BTN_HEIGHT, 0xFF555566);
-        }
-        graphics.drawString(font, text, bx + (PROMO_BTN_WIDTH - textWidth) / 2, by + 6, 0xFFB8860B, true);
-        if (promoLogFrame == -1) {
-            promoLogFrame = 0;
-            System.out.println("[AmityMC] promo button rendered at " + bx + "," + by);
-        }
     }
 
     private void renderSidebar(GuiGraphics graphics) {
         graphics.fill(0, 0, SIDEBAR_WIDTH, height, 0xE81B1D22);
         graphics.fill(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH, height, 0xFF4A4D55);
-        graphics.drawString(font, "MC 存档区块编辑器", 12, 12, 0xFFFFFFFF);
+        graphics.drawString(font, "MC 存档区块编辑器", 12, 14, 0xFFFFFFFF);
         graphics.drawString(font, "筛选条件（勾选后生效）", 12, 28, 0xFFBFC5D2);
         graphics.drawString(font, "已选择：" + selected.size() + "  扫描：" + scanned.size(), 12, 310, 0xFFFFFFFF);
-        graphics.drawString(font, "黄色：附近玩家受保护区块", 12, 324, 0xFFF2C230);
+        graphics.drawString(font, "黄色：玩家附近受保护区块", 12, 324, 0xFFF2C230);
         graphics.drawString(font, "中心：" + centerChunkX + ", " + centerChunkZ
                 + "  缩放：" + Math.round(cellSize), 12, 338, 0xFFBFC5D2);
         long viewBlocks = Math.round((width - SIDEBAR_WIDTH) / cellSize * 16.0D);
         graphics.drawString(font, "视野约 " + viewBlocks + " 格", 12, 352, 0xFFBFC5D2);
-        // 与上面完全相同的渲染路径：侧栏固定位置画服务
-        graphics.drawString(font, "AmityMC 服务器 amitymc.com", 12, 366, 0xFFB8860B);
+        graphics.drawString(font, PromoInfo.SERVER_NAME + " 服务器 " + PromoInfo.SERVER_IP, 12, 366, PROMO_TEXT_COLOR);
     }
 
     private void joinAmity() {
@@ -490,10 +504,7 @@ public class ChunkEditorScreen extends Screen {
             return super.mouseClicked(mouseX, mouseY, button);
         }
 
-        int bx = width - PROMO_BTN_X_OFFSET;
-        int by = height - PROMO_BTN_HEIGHT - 4;
-        if (button == 0 && mouseX >= bx && mouseX < bx + PROMO_BTN_WIDTH
-                && mouseY >= by && mouseY < by + PROMO_BTN_HEIGHT) {
+        if (button == 0 && isPromoHovered((int) mouseX, (int) mouseY)) {
             joinAmity();
             return true;
         }

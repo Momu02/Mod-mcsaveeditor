@@ -1,23 +1,13 @@
 package com.mcsaveeditor.promo;
 
-/**
- * Central place for every piece of AmityMC branding the promotion system
- * shows to players. Change these constants and every splash screen, chat
- * reminder, title button and editor banner follows automatically.
- */
+/** Central place for every piece of AmityMC branding shown to players. */
 public final class PromoInfo {
     private PromoInfo() {
     }
 
-    /** Server display name used on the splash screen and buttons. */
+    /** Server display name shown in the editor. */
     public static final String SERVER_NAME = "AmityMC";
 
-    /** Server address (host or host:port) used for the direct-join action. */
+    /** Server address used for the direct-join action. */
     public static final String SERVER_IP = "amitymc.com";
-
-    /** Public website URL opened by the "visit website" action. */
-    public static final String WEBSITE_URL = "https://amitymc.com";
-
-    /** Short slogan shown under the server name on the splash screen. */
-    public static final String SLOGAN = "原汁原味生存 · 长期稳定 · 玩家至上";
 }
