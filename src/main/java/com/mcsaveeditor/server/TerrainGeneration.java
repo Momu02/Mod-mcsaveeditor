@@ -34,8 +34,8 @@ final class TerrainGeneration {
     /**
      * Generates a fresh chunk (biomes + noise + surface) for the given seed.
      * When {@code biomeId} is a valid registry id, every block column of the
-     * chunk is forced to that biome before the surface is built, so surface
-     * rules (sand, snow, …) match the chosen biome.
+     * chunk is forced to that biome <em>before</em> the noise is filled, so
+     * the terrain shape matches the target biome (e.g. ocean = low, mountains = high).
      */
     static ChunkAccess generate(ServerLevel level, ChunkPos pos, long seed, String biomeId) {
         var generator = level.getChunkSource().getGenerator();
@@ -43,18 +43,22 @@ final class TerrainGeneration {
             throw new IllegalStateException("不支持的地形生成器: " + generator.getClass().getName());
         }
         Holder<NoiseGeneratorSettings> settings = noiseGenerator.generatorSettings();
-        RandomState randomState = RandomState.create(settings.value(), level.registryAccess().lookupOrThrow(Registries.NOISE), seed);
+        RandomState randomState = RandomState.create(settings.value(),
+                level.registryAccess().lookupOrThrow(Registries.NOISE), seed);
         StructureManager structures = level.structureManager();
-        Blender blender = Blender.empty();
         Executor executor = Util.backgroundExecutor();
 
         ProtoChunk chunk = new ProtoChunk(pos, UpgradeData.EMPTY, level,
                 level.registryAccess().registryOrThrow(Registries.BIOME), null);
-        generator.createBiomes(executor, randomState, blender, structures, chunk).join();
+
+        generator.createBiomes(executor, randomState, Blender.empty(), structures, chunk).join();
         chunk.setStatus(ChunkStatus.BIOMES);
-        generator.fillFromNoise(executor, blender, randomState, structures, chunk).join();
-        chunk.setStatus(ChunkStatus.NOISE);
+
         overrideBiomes(chunk, level, biomeId);
+
+        generator.fillFromNoise(executor, Blender.empty(), randomState, structures, chunk).join();
+        chunk.setStatus(ChunkStatus.NOISE);
+
         List<ChunkAccess> chunks = List.of(chunk);
         WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.SURFACE, 1);
         generator.buildSurface(region, structures, randomState, chunk);
@@ -82,7 +86,8 @@ final class TerrainGeneration {
             if (section == null) {
                 continue;
             }
-            PalettedContainer<Holder<Biome>> biomes = (PalettedContainer<Holder<Biome>>) section.getBiomes();
+            PalettedContainer<Holder<Biome>> biomes =
+                    (PalettedContainer<Holder<Biome>>) section.getBiomes();
             for (int x = 0; x < 4; x++) {
                 for (int y = 0; y < 4; y++) {
                     for (int z = 0; z < 4; z++) {
