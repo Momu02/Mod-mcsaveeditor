@@ -247,7 +247,7 @@ public final class ServerChunkEraseService {
                     if (isNearAnyPlayer(pending.pos) || level.getChunkSource().hasChunk(pending.pos.x, pending.pos.z)) {
                         if (!forceUnload(pending.pos)) {
                             deferOrSkip(pending);
-                            continue;
+                            return;
                         }
                     }
                     ChunkMap chunkMap = level.getChunkSource().chunkMap;
@@ -259,7 +259,7 @@ public final class ServerChunkEraseService {
                     } catch (Exception exception) {
                         LOGGER.warn("MC 存档区块编辑器读取区块 {} 数据失败，稍后重试", pending.pos, exception);
                         deferOrSkip(pending);
-                        continue;
+                        return;
                     }
                     ChunkPos pos = pending.pos;
                     long seed = targetSeed;
