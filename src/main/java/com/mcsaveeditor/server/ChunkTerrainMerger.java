@@ -386,26 +386,36 @@ final class ChunkTerrainMerger {
     private static int distanceToOutside(int blockX, int blockZ, Set<Long> selectedChunks, int maxDist) {
         int chunkX = blockX >> 4;
         int chunkZ = blockZ >> 4;
+        if (!selectedChunks.contains(ChunkPos.asLong(chunkX, chunkZ))) {
+            return 0;
+        }
         int maxChunks = (maxDist + 15) >> 4;
-        for (int d = 0; d <= maxChunks; d++) {
+        for (int d = 1; d <= maxChunks; d++) {
+            int nearest = Integer.MAX_VALUE;
             for (int dx = -d; dx <= d; dx++) {
-                if (!selectedChunks.contains(ChunkPos.asLong(chunkX + dx, chunkZ - d))) {
-                    return d * 16;
-                }
-                if (!selectedChunks.contains(ChunkPos.asLong(chunkX + dx, chunkZ + d))) {
-                    return d * 16;
-                }
+                nearest = Math.min(nearest, chunkDistance(blockX, blockZ, chunkX + dx, chunkZ - d, selectedChunks));
+                nearest = Math.min(nearest, chunkDistance(blockX, blockZ, chunkX + dx, chunkZ + d, selectedChunks));
             }
             for (int dz = -d + 1; dz <= d - 1; dz++) {
-                if (!selectedChunks.contains(ChunkPos.asLong(chunkX - d, chunkZ + dz))) {
-                    return d * 16;
-                }
-                if (!selectedChunks.contains(ChunkPos.asLong(chunkX + d, chunkZ + dz))) {
-                    return d * 16;
-                }
+                nearest = Math.min(nearest, chunkDistance(blockX, blockZ, chunkX - d, chunkZ + dz, selectedChunks));
+                nearest = Math.min(nearest, chunkDistance(blockX, blockZ, chunkX + d, chunkZ + dz, selectedChunks));
+            }
+            if (nearest < Integer.MAX_VALUE) {
+                return nearest;
             }
         }
         return maxDist;
+    }
+
+    private static int chunkDistance(int blockX, int blockZ, int chunkX, int chunkZ, Set<Long> selectedChunks) {
+        if (selectedChunks.contains(ChunkPos.asLong(chunkX, chunkZ))) {
+            return Integer.MAX_VALUE;
+        }
+        int minX = chunkX << 4;
+        int minZ = chunkZ << 4;
+        int deltaX = blockX < minX ? minX - blockX : (blockX > minX + 15 ? blockX - (minX + 15) : 0);
+        int deltaZ = blockZ < minZ ? minZ - blockZ : (blockZ > minZ + 15 ? blockZ - (minZ + 15) : 0);
+        return Math.max(deltaX, deltaZ);
     }
 
     private static BlockState blendBlockState(ChunkAccess oldTerrain, ChunkAccess newTerrain,
