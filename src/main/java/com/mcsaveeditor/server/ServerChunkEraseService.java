@@ -7,6 +7,7 @@ import com.mcsaveeditor.network.packet.ChunkOperation;
 import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
@@ -22,8 +23,12 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
@@ -33,6 +38,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Queue;
@@ -246,8 +252,7 @@ public final class ServerChunkEraseService {
                 if (pending != null) {
                     if (isNearAnyPlayer(pending.pos) || level.getChunkSource().hasChunk(pending.pos.x, pending.pos.z)) {
                         if (!forceUnload(pending.pos)) {
-                            deferOrSkip(pending);
-                            return;
+                            pending.inPlace = true;
                         }
                     }
                     ChunkMap chunkMap = level.getChunkSource().chunkMap;
@@ -291,6 +296,42 @@ public final class ServerChunkEraseService {
                 AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
             }
             ChunkPos pos = pending.pos;
+            if (pending.inPlace && level.getChunkSource().hasChunk(pos.x, pos.z)) {
+                applyInPlace(pos, merged);
+            } else {
+                forgetClientChunk(pos);
+            }
+        }
+
+        /**
+         * Applies freshly generated terrain onto a chunk that is still loaded
+         * in memory (e.g. a chunk right next to the player that cannot be
+         * unloaded). The loaded chunk's sections and block entities are
+         * swapped, heightmaps re-primed, light invalidated, and nearby
+         * clients are told to re-fetch the chunk.
+         */
+        private void applyInPlace(ChunkPos pos, CompoundTag merged) {
+            ServerChunkCache chunkSource = level.getChunkSource();
+            LevelChunk loaded = chunkSource.getChunkNow(pos.x, pos.z);
+            if (loaded == null) {
+                forgetClientChunk(pos);
+                return;
+            }
+            ChunkAccess fresh = ChunkSerializer.read(level, level.getPoiManager(), pos, merged);
+            LevelChunkSection[] sourceSections = fresh.getSections();
+            LevelChunkSection[] targetSections = loaded.getSections();
+            System.arraycopy(sourceSections, 0, targetSections, 0, Math.min(sourceSections.length, targetSections.length));
+            Heightmap.primeHeightmaps(loaded, EnumSet.allOf(Heightmap.Types.class));
+            loaded.getBlockEntities().clear();
+            loaded.getBlockEntities().putAll(fresh.getBlockEntities());
+            loaded.setUnsaved(true);
+            LevelLightEngine lightEngine = level.getLightEngine();
+            for (int localX = 0; localX < 16; localX++) {
+                for (int localZ = 0; localZ < 16; localZ++) {
+                    int top = loaded.getHeight(Heightmap.Types.WORLD_SURFACE, pos.getMinBlockX() + localX, pos.getMinBlockZ() + localZ);
+                    lightEngine.checkBlock(new BlockPos(pos.getMinBlockX() + localX, top, pos.getMinBlockZ() + localZ));
+                }
+            }
             forgetClientChunk(pos);
         }
 
@@ -446,8 +487,8 @@ public final class ServerChunkEraseService {
                 return true;
             }
             level.setChunkForced(pos.x, pos.z, false);
-            forgetClientChunk(pos);
             if (!chunkSource.hasChunk(pos.x, pos.z)) {
+                forgetClientChunk(pos);
                 return true;
             }
             return false;
@@ -502,6 +543,7 @@ public final class ServerChunkEraseService {
     private static final class PendingChunk {
         private final ChunkPos pos;
         private int retries;
+        private boolean inPlace;
 
         private PendingChunk(ChunkPos pos) {
             this.pos = pos;

@@ -3,8 +3,10 @@ package com.mcsaveeditor.server;
 import net.minecraft.Util;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
@@ -16,26 +18,33 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 
 final class TerrainGeneration {
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     private TerrainGeneration() {
     }
 
     /**
-     * Generates a fresh chunk (biomes + noise + surface) for the given seed.
+     * Generates a fresh chunk (biomes + noise + surface + decorations) for the given seed.
      * When {@code biomeId} is a valid registry id, every block column of the
      * chunk is forced to that biome before the surface is built, so the
-     * surface blocks (sand, snow, …) match the chosen biome.
+     * surface blocks (sand, snow, …) and decorations (trees, vegetation, ores)
+     * match the chosen biome.
      */
     static ChunkAccess generate(ServerLevel level, ChunkPos pos, long seed, String biomeId) {
         var generator = level.getChunkSource().getGenerator();
@@ -61,7 +70,45 @@ final class TerrainGeneration {
         generator.buildSurface(region, structures, randomState, chunk);
         chunk.setStatus(ChunkStatus.SURFACE);
         Heightmap.primeHeightmaps(chunk, EnumSet.allOf(Heightmap.Types.class));
+        chunk.setStatus(ChunkStatus.FULL);
+        decorate(level, generator, structures, chunk);
+        Heightmap.primeHeightmaps(chunk, EnumSet.allOf(Heightmap.Types.class));
         return chunk;
+    }
+
+    private static void decorate(ServerLevel level, NoiseBasedChunkGenerator generator,
+                                 StructureManager structures, ChunkAccess center) {
+        ChunkPos pos = center.getPos();
+        List<ChunkAccess> chunks = new ArrayList<>(9);
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                ChunkPos neighborPos = new ChunkPos(pos.x + dx, pos.z + dz);
+                if (dx == 0 && dz == 0) {
+                    chunks.add(center);
+                } else {
+                    chunks.add(decorateNeighbor(level, neighborPos));
+                }
+            }
+        }
+        WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.FULL, 1);
+        generator.applyBiomeDecoration(region, center, structures);
+    }
+
+    private static ChunkAccess decorateNeighbor(ServerLevel level, ChunkPos neighborPos) {
+        try {
+            if (AnvilChunkIo.regionFileExists(WorldStoragePaths.chunkRegion(level), neighborPos)) {
+                CompoundTag tag = level.getChunkSource().chunkMap.read(neighborPos).join().orElse(null);
+                if (tag != null && !tag.isEmpty()) {
+                    return ChunkSerializer.read(level, level.getPoiManager(), neighborPos, tag);
+                }
+            }
+        } catch (RuntimeException exception) {
+            LOGGER.warn("MC 存档区块编辑器读取装饰邻居区块 {} 失败，使用空区块", neighborPos, exception);
+        }
+        ProtoChunk placeholder = new ProtoChunk(neighborPos, UpgradeData.EMPTY, level,
+                level.registryAccess().registryOrThrow(Registries.BIOME), null);
+        placeholder.setStatus(ChunkStatus.FULL);
+        return placeholder;
     }
 
     @SuppressWarnings("unchecked")
