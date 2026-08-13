@@ -12,6 +12,7 @@ import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -132,7 +133,7 @@ final class TerrainGeneration {
     @SuppressWarnings("unchecked")
     private static void fillDefaultBiomes(ChunkAccess chunk, ServerLevel level) {
         var registry = level.registryAccess().registryOrThrow(Registries.BIOME);
-        Holder<Biome> fallback = registry.getHolderOrThrow(Biome.PLAINS_LOCATION);
+        Holder<Biome> fallback = registry.getHolderOrThrow(Biomes.PLAINS);
         for (LevelChunkSection section : chunk.getSections()) {
             if (section == null) {
                 continue;
