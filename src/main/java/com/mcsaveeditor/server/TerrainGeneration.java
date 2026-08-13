@@ -20,6 +20,7 @@ import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -76,7 +77,7 @@ final class TerrainGeneration {
         return chunk;
     }
 
-    private static void decorate(ServerLevel level, NoiseBasedChunkGenerator generator,
+    private static void decorate(ServerLevel level, ChunkGenerator generator,
                                  StructureManager structures, ChunkAccess center) {
         ChunkPos pos = center.getPos();
         List<ChunkAccess> chunks = new ArrayList<>(9);

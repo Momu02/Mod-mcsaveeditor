@@ -21,6 +21,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.Util;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -323,7 +324,12 @@ public final class ServerChunkEraseService {
             System.arraycopy(sourceSections, 0, targetSections, 0, Math.min(sourceSections.length, targetSections.length));
             Heightmap.primeHeightmaps(loaded, EnumSet.allOf(Heightmap.Types.class));
             loaded.getBlockEntities().clear();
-            loaded.getBlockEntities().putAll(fresh.getBlockEntities());
+            for (BlockPos blockPos : fresh.getBlockEntitiesPos()) {
+                BlockEntity entity = fresh.getBlockEntity(blockPos);
+                if (entity != null) {
+                    loaded.getBlockEntities().put(blockPos, entity);
+                }
+            }
             loaded.setUnsaved(true);
             LevelLightEngine lightEngine = level.getLightEngine();
             for (int localX = 0; localX < 16; localX++) {
