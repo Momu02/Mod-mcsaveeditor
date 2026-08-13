@@ -91,8 +91,12 @@ final class TerrainGeneration {
                 }
             }
         }
-        WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.FULL, 1);
-        generator.applyBiomeDecoration(region, center, structures);
+        try {
+            WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.FULL, 1);
+            generator.applyBiomeDecoration(region, center, structures);
+        } catch (Exception exception) {
+            LOGGER.error("MC 存档区块编辑器装饰区块 {} 失败（跳过装饰，仅保留地形）", pos, exception);
+        }
     }
 
     private static ChunkAccess decorateNeighbor(ServerLevel level, ChunkPos neighborPos) {
@@ -109,7 +113,31 @@ final class TerrainGeneration {
         ProtoChunk placeholder = new ProtoChunk(neighborPos, UpgradeData.EMPTY, level,
                 level.registryAccess().registryOrThrow(Registries.BIOME), null);
         placeholder.setStatus(ChunkStatus.FULL);
+        fillDefaultBiomes(placeholder, level);
         return placeholder;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void fillDefaultBiomes(ChunkAccess chunk, ServerLevel level) {
+        var registry = level.registryAccess().registryOrThrow(Registries.BIOME);
+        Holder<Biome> fallback = registry.getHolderOrThrow(Biome.PLAINS_LOCATION);
+        for (LevelChunkSection section : chunk.getSections()) {
+            if (section == null) {
+                continue;
+            }
+            PalettedContainer<Holder<Biome>> biomes =
+                    (PalettedContainer<Holder<Biome>>) section.getBiomes();
+            for (int x = 0; x < 4; x++) {
+                for (int y = 0; y < 4; y++) {
+                    for (int z = 0; z < 4; z++) {
+                        Holder<Biome> holder = biomes.get(x, y, z);
+                        if (holder == null) {
+                            biomes.getAndSetUnchecked(x, y, z, fallback);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")
