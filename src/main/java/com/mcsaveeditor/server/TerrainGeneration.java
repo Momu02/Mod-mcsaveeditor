@@ -60,6 +60,7 @@ final class TerrainGeneration {
 
         ProtoChunk chunk = new ProtoChunk(pos, UpgradeData.EMPTY, level,
                 level.registryAccess().registryOrThrow(Registries.BIOME), null);
+        chunk.setLightEngine(level.getLightEngine());
 
         generator.createBiomes(executor, randomState, Blender.empty(), structures, chunk).join();
         chunk.setStatus(ChunkStatus.BIOMES);
@@ -80,19 +81,21 @@ final class TerrainGeneration {
     private static void decorate(ServerLevel level, ChunkGenerator generator,
                                  StructureManager structures, ChunkAccess center) {
         ChunkPos pos = center.getPos();
-        List<ChunkAccess> chunks = new ArrayList<>(9);
-        for (int dz = -1; dz <= 1; dz++) {
-            for (int dx = -1; dx <= 1; dx++) {
+        List<ChunkAccess> chunks = new ArrayList<>(17 * 17);
+        for (int dz = -8; dz <= 8; dz++) {
+            for (int dx = -8; dx <= 8; dx++) {
                 ChunkPos neighborPos = new ChunkPos(pos.x + dx, pos.z + dz);
                 if (dx == 0 && dz == 0) {
                     chunks.add(center);
-                } else {
+                } else if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) {
                     chunks.add(decorateNeighbor(level, neighborPos));
+                } else {
+                    chunks.add(decoratePlaceholder(level, neighborPos));
                 }
             }
         }
         try {
-            WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.FULL, 1);
+            WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.FULL, 8);
             generator.applyBiomeDecoration(region, center, structures);
         } catch (Exception exception) {
             LOGGER.error("MC 存档区块编辑器装饰区块 {} 失败（跳过装饰，仅保留地形）", pos, exception);
@@ -104,15 +107,24 @@ final class TerrainGeneration {
             if (AnvilChunkIo.regionFileExists(WorldStoragePaths.chunkRegion(level), neighborPos)) {
                 CompoundTag tag = level.getChunkSource().chunkMap.read(neighborPos).join().orElse(null);
                 if (tag != null && !tag.isEmpty()) {
-                    return ChunkSerializer.read(level, level.getPoiManager(), neighborPos, tag);
+                    ChunkAccess neighbor = ChunkSerializer.read(level, level.getPoiManager(), neighborPos, tag);
+                    if (neighbor instanceof ProtoChunk proto) {
+                        proto.setLightEngine(level.getLightEngine());
+                    }
+                    return neighbor;
                 }
             }
         } catch (RuntimeException exception) {
             LOGGER.warn("MC 存档区块编辑器读取装饰邻居区块 {} 失败，使用空区块", neighborPos, exception);
         }
+        return decoratePlaceholder(level, neighborPos);
+    }
+
+    private static ChunkAccess decoratePlaceholder(ServerLevel level, ChunkPos neighborPos) {
         ProtoChunk placeholder = new ProtoChunk(neighborPos, UpgradeData.EMPTY, level,
                 level.registryAccess().registryOrThrow(Registries.BIOME), null);
         placeholder.setStatus(ChunkStatus.FULL);
+        placeholder.setLightEngine(level.getLightEngine());
         fillDefaultBiomes(placeholder, level);
         return placeholder;
     }
