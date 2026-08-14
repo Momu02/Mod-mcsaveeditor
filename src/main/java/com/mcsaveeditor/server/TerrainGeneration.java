@@ -73,7 +73,7 @@ final class TerrainGeneration {
         // 在噪声生成前覆盖群系：密度函数按目标群系的深度/尺度参数生成地形，
         // 避免强制樱花林/沼泽时仍按原群系（如海洋）生成水下地形。
         overrideBiomes(chunk, level, biomeId);
-        generator.fillFromNoise(executor, terrainRandomState, Blender.empty(), structures, chunk).join();
+        generator.fillFromNoise(executor, Blender.empty(), terrainRandomState, structures, chunk).join();
         chunk.setStatus(ChunkStatus.NOISE);
         raiseIfBelowSea(chunk, level);
 

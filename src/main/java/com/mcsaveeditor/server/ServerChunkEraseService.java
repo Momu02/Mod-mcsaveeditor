@@ -18,18 +18,16 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.Util;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ThreadedLevelLightEngine;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.network.PacketDistributor;
@@ -346,9 +344,9 @@ public final class ServerChunkEraseService {
             }
             loaded.setUnsaved(true);
             // 全量重算该区块的光照（天空光 + 方块光），替换 sections 后旧的
-            // 光照数据已失效，只对表面调用 checkBlock 会导致地下全黑。
-            level.getLightEngine().lightChunk(loaded, true);
-            loaded.setStatus(ChunkStatus.FULL);
+            // 光照数据已失效。1.20.1 中 lightChunk 在 ThreadedLevelLightEngine 上，
+            // join() 等待光照计算完成后再让客户端重新拉取。
+            ((ThreadedLevelLightEngine) level.getLightEngine()).lightChunk(loaded, true).join();
             forgetClientChunk(pos);
         }
 
