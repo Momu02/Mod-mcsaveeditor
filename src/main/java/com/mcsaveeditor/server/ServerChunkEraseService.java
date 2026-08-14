@@ -343,12 +343,17 @@ public final class ServerChunkEraseService {
                     loaded.getBlockEntities().put(blockPos, entity);
                 }
             }
-            loaded.setUnsaved(true);
-            // 全量重算该区块的光照（天空光 + 方块光），替换 sections 后旧的
-            // 光照数据已失效。1.20.1 中 lightChunk 在 ThreadedLevelLightEngine 上，
-            // join() 等待光照计算完成后再让客户端重新拉取。
-            ((ThreadedLevelLightEngine) level.getLightEngine()).lightChunk(loaded, true).join();
-            forgetClientChunk(pos);
+            // 1.20.1 的光照任务最终在服务端主线程执行（sorter -> runUpdate），
+            // 在这里 join 会死锁：主线程阻塞等 future，而光照任务必须等主线程
+            // 空闲才能运行。改为挂非阻塞续延，光照重算完成后再标记脏数据并
+            // 让客户端重新拉取区块。
+            ThreadedLevelLightEngine lightEngine = (ThreadedLevelLightEngine) level.getLightEngine();
+            lightEngine.lightChunk(loaded, true).thenRunAsync(() -> {
+                level.getServer().execute(() -> {
+                    loaded.setUnsaved(true);
+                    forgetClientChunk(pos);
+                });
+            }, Util.backgroundExecutor());
         }
 
         /**
