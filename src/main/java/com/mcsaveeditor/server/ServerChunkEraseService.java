@@ -40,8 +40,10 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Random;
 import java.util.Set;
@@ -159,6 +161,8 @@ public final class ServerChunkEraseService {
         private int processed;
         private int skipped;
         private boolean closed;
+        private final Set<ChunkPos> deferredInPlace = new HashSet<>();
+        private final Map<ChunkPos, CompoundTag> deferredInPlaceData = new HashMap<>();
 
         private EraseJob(ServerLevel level, ChunkOperation operation, List<ChunkPos> chunks, long targetSeed,
                          String biomeId, ProtectionConfig protectionConfig) {
@@ -228,6 +232,7 @@ public final class ServerChunkEraseService {
         }
 
         private void tickRegenerate() {
+            applyDeferredInPlace();
             List<ChunkPos> completed = new ArrayList<>(1);
             if (pendingGen != null) {
                 if (pendingGen.isDone()) {
@@ -292,12 +297,16 @@ public final class ServerChunkEraseService {
                         level, generated, pending.pos, current, selectedChunks, targetSeed, blendBlocks,
                         protectionConfig);
             }
+            // 新生成区块没有任何光照数据，若以 full 状态写盘，服务器加载时不会
+            // 重新计算光照，客户端会看到全黑。降到 features 状态，让服务器在
+            // 重新加载时自动补跑光照阶段。
+            merged.putString("Status", "minecraft:features");
             chunkMap.write(pending.pos, merged);
             if (AnvilChunkIo.regionFileExists(poiRegionPath, pending.pos)) {
                 AnvilChunkIo.writeChunk(poiStorage, pending.pos, null);
             }
             ChunkPos pos = pending.pos;
-            if (pending.inPlace && level.getChunkSource().hasChunk(pos.x, pos.z)) {
+            if (level.getChunkSource().hasChunk(pos.x, pos.z)) {
                 applyInPlace(pos, merged);
             } else {
                 forgetClientChunk(pos);
@@ -306,18 +315,23 @@ public final class ServerChunkEraseService {
 
         /**
          * Applies freshly generated terrain onto a chunk that is still loaded
-         * in memory (e.g. a chunk right next to the player that cannot be
-         * unloaded). The loaded chunk's sections and block entities are
-         * swapped, heightmaps re-primed, light invalidated, and nearby
+         * in memory. The loaded chunk's sections and block entities are
+         * swapped, heightmaps re-primed, light fully recalculated, and nearby
          * clients are told to re-fetch the chunk.
          */
         private void applyInPlace(ChunkPos pos, CompoundTag merged) {
-            ServerChunkCache chunkSource = level.getChunkSource();
-            LevelChunk loaded = chunkSource.getChunkNow(pos.x, pos.z);
+            LevelChunk loaded = level.getChunkSource().getChunkNow(pos.x, pos.z);
             if (loaded == null) {
-                forgetClientChunk(pos);
+                // 区块正在异步加载（尚未达到 FULL），等它加载完成后替换，
+                // 否则客户端会先拿到旧地形。
+                deferredInPlace.add(pos);
+                deferredInPlaceData.put(pos, merged);
                 return;
             }
+            swapChunkSections(loaded, pos, merged);
+        }
+
+        private void swapChunkSections(LevelChunk loaded, ChunkPos pos, CompoundTag merged) {
             ChunkAccess fresh = ChunkSerializer.read(level, level.getPoiManager(), pos, merged);
             LevelChunkSection[] sourceSections = fresh.getSections();
             LevelChunkSection[] targetSections = loaded.getSections();
@@ -331,14 +345,36 @@ public final class ServerChunkEraseService {
                 }
             }
             loaded.setUnsaved(true);
-            LevelLightEngine lightEngine = level.getLightEngine();
-            for (int localX = 0; localX < 16; localX++) {
-                for (int localZ = 0; localZ < 16; localZ++) {
-                    int top = loaded.getHeight(Heightmap.Types.WORLD_SURFACE, pos.getMinBlockX() + localX, pos.getMinBlockZ() + localZ);
-                    lightEngine.checkBlock(new BlockPos(pos.getMinBlockX() + localX, top, pos.getMinBlockZ() + localZ));
+            // 全量重算该区块的光照（天空光 + 方块光），替换 sections 后旧的
+            // 光照数据已失效，只对表面调用 checkBlock 会导致地下全黑。
+            level.getLightEngine().lightChunk(loaded, true);
+            loaded.setStatus(ChunkStatus.FULL);
+            forgetClientChunk(pos);
+        }
+
+        /**
+         * 生成期间被重新加载的区块会在加载完成后才进入内存，这里每个
+         * tick 重试替换，避免客户端拿到旧地形。
+         */
+        private void applyDeferredInPlace() {
+            if (deferredInPlace.isEmpty()) {
+                return;
+            }
+            for (ChunkPos pos : new ArrayList<>(deferredInPlace)) {
+                LevelChunk loaded = level.getChunkSource().getChunkNow(pos.x, pos.z);
+                if (loaded != null) {
+                    CompoundTag data = deferredInPlaceData.remove(pos);
+                    deferredInPlace.remove(pos);
+                    if (data != null) {
+                        swapChunkSections(loaded, pos, data);
+                    }
+                } else if (!level.getChunkSource().hasChunk(pos.x, pos.z)) {
+                    // 加载被放弃，直接让客户端重新拉取磁盘数据
+                    deferredInPlace.remove(pos);
+                    deferredInPlaceData.remove(pos);
+                    forgetClientChunk(pos);
                 }
             }
-            forgetClientChunk(pos);
         }
 
         private ProcessResult process(PendingChunk pending) {
@@ -514,7 +550,7 @@ public final class ServerChunkEraseService {
         }
 
         private boolean isDone() {
-            return queue.isEmpty() && pendingGen == null;
+            return queue.isEmpty() && pendingGen == null && deferredInPlace.isEmpty();
         }
 
         private void close() {

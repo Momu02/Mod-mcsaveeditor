@@ -1,6 +1,7 @@
 package com.mcsaveeditor.server;
 
 import net.minecraft.Util;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -9,10 +10,12 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -54,8 +57,10 @@ final class TerrainGeneration {
             throw new IllegalStateException("不支持的地形生成器: " + generator.getClass().getName());
         }
         Holder<NoiseGeneratorSettings> settings = noiseGenerator.generatorSettings();
-        RandomState randomState = RandomState.create(settings.value(),
-                level.registryAccess().lookupOrThrow(Registries.NOISE), seed);
+        var noiseLookup = level.registryAccess().lookupOrThrow(Registries.NOISE);
+        // 群系位置始终使用世界种子，保证与原世界一致；只有地形细节使用目标种子。
+        RandomState biomeRandomState = RandomState.create(settings.value(), noiseLookup, level.getSeed());
+        RandomState terrainRandomState = RandomState.create(settings.value(), noiseLookup, seed);
         StructureManager structures = level.structureManager();
         Executor executor = Util.backgroundExecutor();
 
@@ -63,20 +68,71 @@ final class TerrainGeneration {
                 level.registryAccess().registryOrThrow(Registries.BIOME), null);
         chunk.setLightEngine(level.getLightEngine());
 
-        generator.createBiomes(executor, randomState, Blender.empty(), structures, chunk).join();
+        generator.createBiomes(executor, biomeRandomState, Blender.empty(), structures, chunk).join();
         chunk.setStatus(ChunkStatus.BIOMES);
-        generator.fillFromNoise(executor, Blender.empty(), randomState, structures, chunk).join();
-        chunk.setStatus(ChunkStatus.NOISE);
+        // 在噪声生成前覆盖群系：密度函数按目标群系的深度/尺度参数生成地形，
+        // 避免强制樱花林/沼泽时仍按原群系（如海洋）生成水下地形。
         overrideBiomes(chunk, level, biomeId);
-        List<ChunkAccess> chunks = List.of(chunk);
+        generator.fillFromNoise(executor, terrainRandomState, Blender.empty(), structures, chunk).join();
+        chunk.setStatus(ChunkStatus.NOISE);
+        raiseIfBelowSea(chunk, level);
+
+        List<ChunkAccess> chunks = new ArrayList<>(9);
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dz == 0) {
+                    chunks.add(chunk);
+                } else {
+                    chunks.add(decorateNeighbor(level, new ChunkPos(pos.x + dx, pos.z + dz)));
+                }
+            }
+        }
         WorldGenRegion region = new WorldGenRegion(level, chunks, ChunkStatus.SURFACE, 1);
-        generator.buildSurface(region, structures, randomState, chunk);
+        generator.buildSurface(region, structures, terrainRandomState, chunk);
         chunk.setStatus(ChunkStatus.SURFACE);
         Heightmap.primeHeightmaps(chunk, EnumSet.allOf(Heightmap.Types.class));
         chunk.setStatus(ChunkStatus.FULL);
         decorate(level, generator, structures, chunk);
         Heightmap.primeHeightmaps(chunk, EnumSet.allOf(Heightmap.Types.class));
         return chunk;
+    }
+
+    /**
+     * 陆地群系的地形如果远低于海平面（例如随机种子在深海位置生成了
+     * 樱花林/沼泽等陆地群系），把该列垫高到海平面，避免整个区域被淹。
+     * 浅水（海平面下 4 格以内）保留原样，沼泽的浅水特性不受影响。
+     */
+    private static void raiseIfBelowSea(ChunkAccess chunk, ServerLevel level) {
+        int seaLevel = level.getSeaLevel();
+        int minY = level.getMinBuildHeight();
+        int sectionIndex = chunk.getSectionIndex(seaLevel);
+        LevelChunkSection seaSection = chunk.getSection(sectionIndex);
+        if (seaSection == null) {
+            return;
+        }
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                Holder<Biome> biome = seaSection.getNoiseBiome(localX >> 2, 1, localZ >> 2);
+                if (biome.is(BiomeTags.IS_OCEAN) || biome.is(BiomeTags.IS_RIVER) || biome.is(BiomeTags.IS_BEACH)) {
+                    continue;
+                }
+                int top = minY - 1;
+                for (int y = seaLevel; y >= minY; y--) {
+                    pos.set(localX, y, localZ);
+                    if (!chunk.getBlockState(pos).isAir()) {
+                        top = y;
+                        break;
+                    }
+                }
+                if (top < seaLevel - 4) {
+                    for (int y = top + 1; y <= seaLevel; y++) {
+                        pos.setY(y);
+                        chunk.setBlockState(pos, Blocks.STONE.defaultBlockState(), false);
+                    }
+                }
+            }
+        }
     }
 
     private static void decorate(ServerLevel level, ChunkGenerator generator,
