@@ -1,50 +1,256 @@
-# MC Save Editor
+# MC Save Editor（MC 存档区块编辑器）
 
-Forge 1.20.1 dual-side mod for in-game saved-chunk visualization, filtering, data updates, and safe deletion.
+Forge 1.20.1 双端模组：在游戏内直接查看、筛选、升级、重建和安全删除已保存的区块。
+不用关服、不用离线工具，管理员打开一个可视化地图就能管理整个世界的区块数据。
 
-## Server Promotion
+> ⚠️ **重要提醒**：本模组会**永久修改存档**（删除 / 重建地形不可撤销）。
+> 动手前请先备份世界文件夹（`world/` 整个目录复制一份），先在复制的世界里试一遍。
 
-The mod is provided by the **AmityMC** server (`amitymc.com`). Promotion is deliberately unobtrusive and only appears inside the chunk editor itself:
+---
 
-- A small banner at the bottom of the editor sidebar: "本工具由 AmityMC 提供支持 / 官网: amitymc.com".
-- A single "加入 AmityMC (amitymc.com)" button in the editor sidebar that connects straight to the server with one click.
+## 目录
 
-There is no forced splash screen, no main-menu button, and no periodic chat reminders. Players only ever see the promotion while they are actively using the chunk editor.
+- [1. 功能一览](#1-功能一览)
+- [2. 环境要求与安装](#2-环境要求与安装)
+- [3. 快速开始（5 分钟上手）](#3-快速开始5-分钟上手)
+- [4. 命令详解](#4-命令详解)
+- [5. 图形界面完整说明](#5-图形界面完整说明)
+  - [5.1 界面布局](#51-界面布局)
+  - [5.2 筛选条件与扫描](#52-筛选条件与扫描)
+  - [5.3 扫描速度](#53-扫描速度)
+  - [5.4 地图操作](#54-地图操作)
+  - [5.5 三大操作按钮](#55-三大操作按钮)
+  - [5.6 重建地形参数（种子 / 群系 / 融合策略）](#56-重建地形参数种子--群系--融合策略)
+  - [5.7 黄色保护区块](#57-黄色保护区块)
+  - [5.8 参数记忆](#58-参数记忆)
+- [6. 使用场景指南](#6-使用场景指南)
+  - [6.1 场景一：清理无人问津的旧区块，给服务器减负](#61-场景一清理无人问津的旧区块给服务器减负)
+  - [6.2 场景二：旧版本存档升级，修复数据版本](#62-场景二旧版本存档升级修复数据版本)
+  - [6.3 场景三：换种子重建一片区域（保留建筑）](#63-场景三换种子重建一片区域保留建筑)
+  - [6.4 场景四：把一片区域强制改成指定群系](#64-场景四把一片区域强制改成指定群系)
+  - [6.5 场景五：删除废弃地皮 / 垃圾区块，让它重新生成](#65-场景五删除废弃地皮--垃圾区块让它重新生成)
+  - [6.6 场景六：单机玩家整理自己的存档](#66-场景六单机玩家整理自己的存档)
+- [7. 保护机制（为什么有的区块动不了）](#7-保护机制为什么有的区块动不了）
+- [8. 工作原理（技术设计）](#8-工作原理技术设计)
+- [9. 客户端配置文件](#9-客户端配置文件)
+- [10. 常见问题 FAQ](#10-常见问题-faq)
+- [11. 已知问题与未解决 Bug](#11-已知问题与未解决-bug)
+- [12. 待开发功能（Roadmap）](#12-待开发功能roadmap)
+- [13. 本次更新记录](#13-本次更新记录)
+- [14. 服务器推广](#14-服务器推广)
+- [15. 开发者信息](#15-开发者信息)
+- [16. 构建与持续集成](#16-构建与持续集成)
+- [17. 免责声明与授权](#17-免责声明与授权)
 
-Server info lives in one place: `promo/PromoInfo.java` (`SERVER_NAME`, `SERVER_IP`, `WEBSITE_URL`).
+---
 
-## Usage
+## 1. 功能一览
 
-1. Build with Java 17 and ForgeGradle.
-2. Install the jar on both client and server.
-3. Run `/mcsaveeditor open` as an operator with permission level 3 or higher.
-4. In the GUI:
-   - Enable the range and inhabited-time filters as needed, then click scan. A filter is ignored unless its checkbox is enabled.
-   - Generated chunks receive an 8x8 terrain preview. Scan results are not selected automatically.
-   - Left drag selects chunks, right drag removes chunks, middle drag pans, wheel zooms.
-   - Click `Update` to run Minecraft's current chunk data fixer without removing blocks, block entities, entities, or POI data.
-   - Click `Delete Completely` to remove the chunk from terrain, POI, and entity region storage. The chunk is generated again when it is next visited.
+| 功能 | 说明 |
+|---|---|
+| 🗺️ 区块可视化地图 | 把硬盘上 **region/*.mca** 里已保存的区块画成 2D 地图，每个区块带 8×8 地形缩略图预览 |
+| 🔍 双条件筛选扫描 | 按**范围半径**、按**玩家累计停留时间**（InhabitedTime）过滤后再显示 |
+| ⬆️ 升级区块数据 | 用当前版本的数据修复器（DataFixer）把旧 NBT 升级到最新 `DataVersion`，不删方块、不删实体 |
+| 🏔️ 重建地形（保留建筑） | 用新种子重新生成地形，**玩家建筑自动识别并保留**，边缘高度平滑融合 |
+| 🧹 彻底删除区块 | 从地形 / POI / 实体三套存储中移除区块，下次有人靠近时按原版规则重新生成 |
+| 🎨 强制群系 | 重建时可指定 12 种群系之一，整片区域统一变成该群系（含地表方块与装饰） |
+| 🛡️ 多层保护 | 玩家身边区块（黄色）不可选；目标区块有人或仍被加载时操作自动等待/跳过 |
+| ⚙️ 全参数记忆 | 上次的半径、时间、种子、群系、保护分类、缩放、视角全部自动记住 |
 
-## Design Notes
+---
 
-- No external database is used. The server reads currently loaded vanilla chunks directly and never generates chunks for a scan.
-- Scan jobs run on the server tick in small batches, so they do not block the game with a large synchronous scan.
-- Terrain previews sample the top block every two blocks and are streamed in batches. Rendering only visits visible chunks and reduces detail while zoomed out. Yellow chunks are protected around players and cannot be selected for deletion.
-- Delete jobs run on the server tick thread in small batches. A target chunk is erased only after:
-  - forced chunk state is disabled,
-  - no player is within the guarded view-distance range,
-  - `ServerChunkCache#hasChunk(x, z)` reports that it is not currently loaded.
-- Complete deletion removes the chunk slot from `region`, `poi`, and `entities` storage, resetting the target to an ungenerated state for future terrain generation. The live server uses its own chunk storage queue for terrain deletion so a later save cannot restore stale data. Physical `.mca` compaction requires an offline tool because the running server keeps region files open.
-- Updating a chunk means upgrading its stored NBT to the current Minecraft data version. Minecraft cannot regenerate arbitrary terrain at the same coordinates while also guaranteeing that overlapping player-built blocks remain unchanged.
+## 2. 环境要求与安装
 
-## Important Files
+### 2.1 版本要求
 
-- `ServerChunkScanService`: async scan entry point and batching.
-- `AnvilChunkIo`: direct `RegionFileStorage` read/write helpers.
-- `ServerChunkEraseService`: main-thread erase queue with player/load guards.
-- `ChunkEditorScreen`: 2D grid rendering, zoom/pan, range selection, client packet dispatch.
-- `ModNetworking`: Forge `SimpleChannel` packet registration.
+| 项目 | 要求 |
+|---|---|
+| Minecraft | 1.20.1 |
+| Forge | 47.x（构建使用 47.3.0，`[47,)` 范围内均可） |
+| Java | 17（构建与运行都需要） |
+| 安装位置 | **客户端和服务端都要装**（双端模组，缺一边无法使用） |
 
-## Production Hardening
+### 2.2 安装步骤
 
-For a live Mohist server, test this against a copied world first. Mohist plugins may hold chunk tickets outside normal Forge flows, so the erase service intentionally skips chunks that remain loaded after retries instead of forcing a dangerous delete.
+1. 从 Releases 页面下载 `mcsaveeditor-<版本>.jar`。
+2. 把 jar 放进**服务端**的 `mods/` 文件夹。
+3. 需要使用编辑器的**每个管理员客户端**也把同一个 jar 放进自己的 `mods/` 文件夹（普通玩家不需要装）。
+4. 重启服务端，进服即可。
+
+### 2.3 单机使用
+
+单机同样可用：把 jar 放进单机游戏的 `mods/`，进入存档前先**开启作弊**（创建世界时「允许作弊：开」，或对局域网开放时允许作弊），否则权限等级 3 的命令用不了。
+
+---
+
+## 3. 快速开始（5 分钟上手）
+
+1. 以 OP（权限等级 ≥ 3）身份进服，执行：
+   ```
+   /mcsaveeditor open
+   ```
+   编辑器界面打开，地图中心就是你当前所在的区块。
+2. 左侧勾选「限制范围」，半径填 `128`，点「扫描区块」。
+3. 等扫描完成（聊天栏会提示找到多少区块），地图上出现地形缩略图。
+4. **左键拖框**选中一片想处理的区块 → 点「重建地形（保留建筑）」。
+5. **离开那片区域**（走远到区块卸载），等服务端逐个处理完，聊天栏会广播完成。
+6. 回去看：地形换了新样子，你的房子还在。
+
+---
+
+## 4. 命令详解
+
+```
+/mcsaveeditor open
+```
+
+- 唯一命令，打开区块编辑器 GUI。
+- 需要权限等级 3（`source.hasPermission(3)`），即 OP。
+- 无权限会收到红色提示「你没有权限使用 MC Save Editor。」。
+- 打开时自动以你当前所在区块为地图中心，并把你的客户端偏好（上次的半径、缩放等）恢复出来。
+- **服务端校验**：真正的扫描和删除请求在服务端会**再次校验权限**（`player.hasPermissions(3)`），客户端伪造数据包也绕不过去。
+
+---
+
+## 5. 图形界面完整说明
+
+### 5.1 界面布局
+
+```
+┌──────────────┬─────────────────────────────────┐
+│  侧边栏 224px │                                 │
+│  标题/筛选    │                                 │
+│  操作按钮     │          区块地图               │
+│  种子/速度    │     （缩放/平移/框选）          │
+│  群系/融合    │                                 │
+│  状态/推广    │                    [加入 AmityMC]│
+└──────────────┴─────────────────────────────────┘
+```
+
+- 左侧是控制面板，右侧是地图。
+- 地图中央十字亮线是编辑器打开时你所在的中心区块。
+- 右下角「加入 AmityMC」按钮：一键直连推广服务器（见第 14 节），点按不会误触你的框选。
+
+### 5.2 筛选条件与扫描
+
+| 控件 | 说明 |
+|---|---|
+| 限制范围（复选框 + 区块半径） | 勾选后只扫描以你为中心、边长 `半径×2+1` 的正方形区域。**不勾选 = 全世界所有 region 文件**，大服慎用。默认值 128。服务端上限 512。 |
+| 限制时间（复选框 + 最长停留分钟） | 勾选后只保留「累计停留时间 ≤ 该分钟数」的区块。原理：每个区块 NBT 里有 `InhabitedTime`（玩家在附近累计待了多少 tick），常去的主城数值很大，偏远地区很小。默认值 5 分钟。 |
+| 扫描区块 | 发起扫描。**每次扫描会先清空上次的扫描结果和选择**。 |
+| 取消扫描 | 中止正在进行的服务端扫描任务。 |
+| 清除选择 | 只清空红色选中框，不影响已扫描数据。 |
+
+筛选逻辑是「与」关系：同时勾选范围和时间 = 范围内 **且** 停留时间达标的区块。
+
+每次扫描完成，服务端会在你的聊天栏提示「扫描完成，共找到 N 个区块」；未完成的扫描关界面时会自动取消（但服务端那个 tick 队列里的任务需要收到取消包，建议手动点「取消扫描」）。
+
+### 5.3 扫描速度
+
+滑条范围 1–256 区块/游戏刻，默认 32。
+
+- 调大：扫描完成快，但每个游戏刻读盘更多，大服在线高峰可能引起轻微卡顿。
+- 调小：几乎无感，适合边玩边扫。
+- ⚠️ 注意：这是**全服共享**的服务端全局值，任何 OP 一拖，所有人的扫描速度都变（重启后恢复默认，下次打开编辑器拖动滑条才会再次下发）。
+
+### 5.4 地图操作
+
+| 操作 | 效果 |
+|---|---|
+| 左键拖拽 | 框选：把矩形内的区块标红（加入待处理集合）。扫描时被标黄的保护区块**不会**被选入。 |
+| 右键拖拽 | 取消框选：把矩形内的区块从待处理集合移除。 |
+| 中键拖拽 | 平移地图视角。 |
+| 滚轮 | 以鼠标为中心缩放。缩到很小会自动降细节（采样显示），放到最大看 8×8 地形缩略图。 |
+| 鼠标悬停 | 地图上跟随显示 `区块X, 区块Z` 坐标。 |
+
+单次操作最多提交 **4096** 个区块（升级/删除），重建地形单次最多 **65536** 个；选多了界面会提示分批。
+
+### 5.5 三大操作按钮
+
+三个按钮都只对「红色选中区块」生效，执行后这些区块会从选中集合移除（删除还会从扫描结果里移除）。
+
+#### ① 升级区块数据
+
+- 把选中区块的 NBT 用当前版本的 DataFixer 升到最新 `DataVersion`。
+- 地形、POI、实体三套存储**都会**升级。
+- **不删除任何方块、方块实体、实体、POI 数据**——纯升级。
+- 适合：从旧版本（或旧 Forge）升上来的存档，想把数据版本刷齐。
+
+#### ② 重建地形（保留建筑）
+
+- 用目标种子重新生成地形，等于「把这片地方推平重长一遍」。
+- **建筑保护**：模组会识别玩家建筑（墙/门/楼梯/台阶/箱子/火把/玻璃/混凝土/陶瓦/羊毛/木板/石砖等，详见融合策略）并原样保留；建筑周围 4 格渐变过渡，不会出现悬崖切面。
+- 选区边缘最多 96 格宽的平滑融合带，与周围原生地形自然衔接。
+- 目标区块必须**先卸载**（你和其它玩家都走开），否则任务会一直等待直到区块空闲。
+- 重建是逐个区块来的（一次只生成一个），速度慢（见第 11 节），大选区请耐心等待，处理完会全服广播「已处理 N 个，跳过 M 个」。
+
+#### ③ 彻底删除
+
+- 从 `region/`（地形）、`poi/`（兴趣点）、`entities/`（实体）三套存储里**同时抹掉**该区块。
+- 下次有玩家靠近，区块按原版规则**全新生成**（等于恢复成「从没来过」的样子）。
+- ⚠️ 删除前再次确认选区，**删了找不回来**。
+- 物理 `.mca` 文件不会自动变小（运行中的服务器占着文件），想回收磁盘空间需要关服后用离线工具压缩（见 FAQ）。
+
+### 5.6 重建地形参数（种子 / 群系 / 融合策略）
+
+| 控件 | 说明 |
+|---|---|
+| 随机种子（复选框） | 勾选 = 每次重建用全新随机种子；取消勾选则使用下方「目标种子」输入框的固定值（想复现同一套地形就用固定种子）。 |
+| 目标种子 | 整数，随机种子关闭时生效。格式错误会弹窗提示。 |
+| 群系（循环按钮） | 点一下换下一个：原版（世界随机）/ 平原 / 沙漠 / 森林 / 针叶林 / 沼泽 / 雪原 / 草原 / 海洋 / 蘑菇岛 / 恶地 / 丛林 / 樱花林。选定群系后，**整片重建区的地形、表面方块和装饰都按该群系生成**（如强制樱花林时不再按原海洋群系生成水下地形）。未知群系 id 会被服务端拒绝。 |
+| 融合策略（展开/收起） | 11 个保护分类复选框，决定重建时哪些「看起来像人造的」方块要保留（见下表）。 |
+
+融合策略分类（默认开/关）：
+
+| 分类 | 默认 | 说明 |
+|---|---|---|
+| 泥土 / 沙 / 石头 / 雪 / 冰 | ❌ 关 | 自然系，默认不保护；想保留泥土地基等可手动打开 |
+| 玻璃 / 混凝土 / 陶瓦 / 羊毛 / 木板 / 石砖 | ✅ 开 | 建筑系，默认保护 |
+
+除分类外，还有一批「核心建筑方块」**永远保护**（除非将来开放排除名单）：楼梯、台阶、墙、栅栏、门、床、箱子、熔炉、附魔台、铁/金/钻石块等，以及火把、按钮、拉杆、压力板、铁轨、旗帜等小装饰。自然原木（带树叶的树）会被识别为树而整体保留；单独两根以上的去皮/非自然原木柱也会被当作人工木料保留。
+
+> 排除名单（`excludedBlocks`）机制在代码里已预留但界面尚未开放，见第 12 节。
+
+### 5.7 黄色保护区块
+
+- 地图上**黄色** = 有玩家在附近（服务端视角距离 +1 范围内），**不可选中、不可操作**，防止你把别人脚下的区块删了。
+- 保护名单在扫描开始那一刻生成快照；扫描过程中新加入/走动的玩家，颜色可能不是最新，但**真正执行删除/重建时服务端会重新检查**，所以即使颜色没刷新也不会误删——最多是任务多等一会儿。
+- 想处理黄色区域：让所有人离开，等区块卸载后再操作。
+
+### 5.8 参数记忆
+
+关闭界面时自动保存全部参数到客户端配置文件（Forge 客户端配置），下次打开恢复：扫描半径/时间开关与数值、扫描速度、随机种子开关/目标种子、群系、融合策略勾选、地图缩放与视角。
+
+---
+
+## 6. 使用场景指南
+
+### 6.1 场景一：清理无人问津的旧区块，给服务器减负
+
+服务器开了几年，玩家探索过的边缘地块越积越多，存档几十 GB。
+
+1. `/mcsaveeditor open` 打开编辑器。
+2. **不勾选**「限制范围」（全服扫描），勾选「限制时间」，填 `30`（分钟）。
+3. 点「扫描区块」，去喝杯水等它扫完。
+4. 地图上留下来的就是「有人去过但累计停留 ≤ 30 分钟」的区块——路过开图、迷路乱逛的痕迹基本都在这。
+5. 左键框选这些偏远区块 → 点「彻底删除」→ 离开目标区等广播完成。
+6. 存档瘦身完成，这些地方下次有人去会重新生成。
+
+> 建议先勾选范围在小区域试一次，确认效果符合预期再全服铺开。
+
+### 6.2 场景二：旧版本存档升级，修复数据版本
+
+1.17 时代的老存档升到 1.20.1 后，`DataVersion` 新旧混杂。
+
+1. 打开编辑器，限制范围框住老主城及周边。
+2. 扫描 → 全选（左键大框）→ 点「升级区块数据」。
+3. 等待完成广播。方块、箱子里的东西、村民、刷怪笼原样保留，只是数据版本刷到最新。
+4. 升级只做 NBT 迁移，不改变地形；且逐区块 flush，大批量时服务器会有可感知的 IO 开销，建议在线低峰做（见第 11 节）。
+
+### 6.3 场景三：换种子重建一片区域（保留建筑）
+
+主城旁边有一片被炸烂/挖空的矿区，想换套地形但保住上面的房子。
+
+1. 打开编辑器，扫描目标区域。
+2. 框选矿区，中
+...[truncated 20887 chars]
