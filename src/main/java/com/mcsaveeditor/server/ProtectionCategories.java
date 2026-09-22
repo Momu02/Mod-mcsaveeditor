@@ -8,7 +8,6 @@ import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.BasePressurePlateBlock;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.BushBlock;
 import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.CarpetBlock;
 import net.minecraft.world.level.block.ChainBlock;
@@ -149,58 +148,6 @@ public final class ProtectionCategories {
                 || state.is(Blocks.DIRT_PATH)
                 || state.is(Blocks.FARMLAND)
                 || state.is(Blocks.HAY_BLOCK);
-    }
-
-    /**
-     * Blocks that are naturally generated terrain and must never be treated as
-     * player-built by default (a player can still opt in via categories).
-     */
-    static boolean isNaturalTerrainBlock(BlockState state) {
-        if (state.isAir()) {
-            return true;
-        }
-        if (state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER)) {
-            return true;
-        }
-        if (state.is(BlockTags.DIRT) || state.is(BlockTags.SAND) || state.is(BlockTags.LEAVES)
-                || state.is(BlockTags.FLOWERS)) {
-            return true;
-        }
-        if (state.is(BlockTags.COAL_ORES) || state.is(BlockTags.IRON_ORES) || state.is(BlockTags.COPPER_ORES)
-                || state.is(BlockTags.GOLD_ORES) || state.is(BlockTags.REDSTONE_ORES)
-                || state.is(BlockTags.EMERALD_ORES) || state.is(BlockTags.LAPIS_ORES)
-                || state.is(BlockTags.DIAMOND_ORES)) {
-            return true;
-        }
-        return state.is(Blocks.GRAVEL)
-                || state.is(Blocks.CLAY)
-                || state.is(Blocks.CALCITE)
-                || state.is(Blocks.TUFF)
-                || state.is(Blocks.DRIPSTONE_BLOCK)
-                || state.is(Blocks.POINTED_DRIPSTONE)
-                || state.is(Blocks.SMOOTH_BASALT)
-                || state.is(Blocks.AMETHYST_BLOCK)
-                || state.is(Blocks.BUDDING_AMETHYST)
-                || state.is(Blocks.MAGMA_BLOCK)
-                || state.is(Blocks.BEDROCK)
-                || state.is(Blocks.NETHERRACK)
-                || state.is(Blocks.END_STONE)
-                || state.is(Blocks.SOUL_SAND)
-                || state.is(Blocks.SOUL_SOIL)
-                || state.is(Blocks.GLOWSTONE)
-                || state.is(Blocks.BLACKSTONE)
-                || state.is(Blocks.BASALT)
-                || state.is(Blocks.SNOW)
-                || state.is(Blocks.SNOW_BLOCK)
-                || state.is(Blocks.POWDER_SNOW)
-                || state.is(Blocks.ICE)
-                || state.is(Blocks.PACKED_ICE)
-                || state.is(Blocks.BLUE_ICE)
-                || state.is(Blocks.MOSS_BLOCK)
-                || state.is(Blocks.MOSS_CARPET)
-                || state.is(Blocks.SCULK)
-                || state.is(Blocks.SCULK_VEIN)
-                || state.getBlock() instanceof BushBlock;
     }
 
     /**

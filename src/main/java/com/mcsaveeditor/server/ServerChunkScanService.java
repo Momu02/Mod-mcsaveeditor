@@ -7,6 +7,7 @@ import com.mcsaveeditor.network.packet.ScanResultPacket;
 import com.mcsaveeditor.network.packet.ScanSpeedPacket;
 import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -148,6 +149,7 @@ public final class ServerChunkScanService {
         private int found;
         private boolean finished;
         private boolean closed;
+        private boolean warnedCorruptChunk;
 
         private ScanJob(ServerPlayer player, Path regionPath, int centerX, int centerZ, boolean limitRadius,
                         int radius, boolean limitInhabitedTime, long maxInhabitedTicks,
@@ -182,7 +184,17 @@ public final class ServerChunkScanService {
                 int z = (region.z() << 5) + (localIndex >> 5);
                 ChunkPos pos = new ChunkPos(x, z);
                 if (!limitRadius || Math.abs(x - centerX) <= radius && Math.abs(z - centerZ) <= radius) {
-                    net.minecraft.nbt.CompoundTag tag = storage.read(pos);
+                    CompoundTag tag;
+                    try {
+                        tag = storage.read(pos);
+                    } catch (IOException exception) {
+                        if (!warnedCorruptChunk) {
+                            warnedCorruptChunk = true;
+                            LOGGER.warn("MC 存档区块编辑器：区块 {} 读取失败，扫描将跳过损坏区块", pos, exception);
+                        }
+                        advance();
+                        continue;
+                    }
                     if (tag != null && !tag.isEmpty()) {
                         long inhabitedTicks = AnvilChunkIo.readInhabitedTicks(tag);
                         if (limitInhabitedTime && inhabitedTicks > maxInhabitedTicks) {

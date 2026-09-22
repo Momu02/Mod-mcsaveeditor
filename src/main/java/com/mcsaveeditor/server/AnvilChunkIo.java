@@ -16,14 +16,6 @@ public final class AnvilChunkIo {
     private AnvilChunkIo() {
     }
 
-    public static long readInhabitedTicks(RegionFileStorage storage, ChunkPos pos) throws IOException {
-        CompoundTag tag = storage.read(pos);
-        if (tag == null || tag.isEmpty()) {
-            return -1L;
-        }
-        return readInhabitedTicks(tag);
-    }
-
     public static long readInhabitedTicks(CompoundTag tag) {
         return readInhabitedTime(tag);
     }

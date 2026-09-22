@@ -621,11 +621,13 @@ final class ChunkTerrainMerger {
                                            Set<Long> selectedChunks, long seed, int blendBlocks,
                                            boolean[] buildingColumn, ProtectionConfig config) {
         Map<BlockPos, CompoundTag> currentBes = readBlockEntities(currentTag);
+        Map<BlockPos, CompoundTag> generatedBes = saveBlockEntities(generatedNew);
 
         for (BlockPos placePos : new HashSet<>(getBlockEntityMap(generatedNew).keySet())) {
             generatedNew.removeBlockEntity(placePos);
         }
 
+        Set<BlockPos> restoredOld = new HashSet<>();
         for (Map.Entry<BlockPos, CompoundTag> entry : currentBes.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockState state = generatedNew.getBlockState(pos);
@@ -633,14 +635,14 @@ final class ChunkTerrainMerger {
                 BlockEntity blockEntity = BlockEntity.loadStatic(pos, state, entry.getValue());
                 if (blockEntity != null) {
                     generatedNew.setBlockEntity(blockEntity);
+                    restoredOld.add(pos);
                 }
             }
         }
 
-        Map<BlockPos, CompoundTag> generatedBes = saveBlockEntities(generatedNew);
         for (Map.Entry<BlockPos, CompoundTag> entry : generatedBes.entrySet()) {
             BlockPos pos = entry.getKey();
-            if (getBlockEntityMap(generatedNew).containsKey(pos)) {
+            if (restoredOld.contains(pos) || getBlockEntityMap(generatedNew).containsKey(pos)) {
                 continue;
             }
             if (effectiveBlend(pos.getX(), pos.getZ(), selectedChunks, seed, blendBlocks, buildingColumn) < 0.5D) {

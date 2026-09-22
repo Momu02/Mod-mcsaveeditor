@@ -3,10 +3,6 @@ package com.mcsaveeditor.server;
 import com.mcsaveeditor.network.packet.ChunkTimeEntry;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.Locale;
 
@@ -25,25 +21,6 @@ final class ChunkTerrainSampler {
                 int blockX = mapX * 2 + 1;
                 int blockZ = mapZ * 2 + 1;
                 colors[mapZ * ChunkTimeEntry.MAP_SIZE + mapX] = sampleColumn(sections, blockX, blockZ);
-            }
-        }
-        return colors;
-    }
-
-    static int[] sample(LevelChunk chunk) {
-        int[] colors = new int[ChunkTimeEntry.MAP_PIXELS];
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (int mapZ = 0; mapZ < ChunkTimeEntry.MAP_SIZE; mapZ++) {
-            for (int mapX = 0; mapX < ChunkTimeEntry.MAP_SIZE; mapX++) {
-                int x = mapX * 2 + 1;
-                int z = mapZ * 2 + 1;
-                int topY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
-                if (topY < chunk.getMinBuildHeight()) {
-                    colors[mapZ * ChunkTimeEntry.MAP_SIZE + mapX] = AIR_COLOR;
-                } else {
-                    String block = BuiltInRegistries.BLOCK.getKey(chunk.getBlockState(pos.set(x, topY, z)).getBlock()).getPath();
-                    colors[mapZ * ChunkTimeEntry.MAP_SIZE + mapX] = shade(baseColor(block), topY);
-                }
             }
         }
         return colors;

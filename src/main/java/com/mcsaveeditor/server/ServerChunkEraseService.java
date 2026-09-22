@@ -119,6 +119,10 @@ public final class ServerChunkEraseService {
             JOBS.poll();
             job.close();
             LOGGER.error("MC 存档区块编辑器：任务执行异常，已终止", exception);
+            job.level.getServer().getPlayerList().broadcastSystemMessage(
+                    Component.literal("MC 存档区块编辑器：" + operationName(job.operation)
+                            + "任务执行异常已终止，已处理 " + job.processed + " 个，跳过 " + job.skipped
+                            + " 个，详情见服务端日志。"), false);
             return;
         }
         if (job.isDone()) {
