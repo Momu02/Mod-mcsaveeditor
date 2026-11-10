@@ -1,0 +1,42 @@
+name: build-mod
+
+on:
+  push:
+    branches: [ "main", "master", "1.20.1" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-mod:
+    runs-on: ubuntu-latest
+
+    container:
+      image: gradle:8.5-jdk17-jammy
+
+    steps:
+      - name: 1. Checkout source
+        uses: actions/checkout@v4
+
+      - name: 2. Build Forge mod
+        run: gradle build --no-daemon --stacktrace
+
+      - name: 3. Collect jars
+        run: |
+          mkdir -p ./dist
+          find . -path "*/build/libs/*.jar" ! -name "*-sources.jar" ! -name "*-all.jar" -exec cp {} ./dist/ \;
+          echo "=== Build artifacts ==="
+          ls -lh ./dist/
+
+      - name: 4. Compute tag
+        id: tag
+        run: echo "name=build-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: 5. Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Build #${{ github.run_number }}
+          body: Automated build for ${{ github.sha }}
+          files: ./dist/*.jar
