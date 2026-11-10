@@ -1,0 +1,27 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="mcsaveeditor"
+version="${file.jarVersion}"
+displayName="MC Save Editor"
+authors="AmityMC"
+description='''
+In-game chunk scan and erase tools based on vanilla InhabitedTime data.
+由 AmityMC 服务器 (amitymc.com) 提供支持。
+'''
+
+[[dependencies.mcsaveeditor]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.mcsaveeditor]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.20.2)"
+ordering="NONE"
+side="BOTH"
